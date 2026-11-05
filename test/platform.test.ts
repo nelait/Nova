@@ -54,24 +54,26 @@ test('reassign: target must hold the skill at the required level; auto reassign 
   assert.throws(() => app.cases.reassign(verify.id, 'lead', 'u_priya'), /lacks COMPLIANCE/);
   // Sponsor verification needs COMPLIANCE level 2+: Sam (level 1) can't take it.
   assert.throws(() => app.cases.reassign(verify.id, 'lead', 'u_sam'), /lacks COMPLIANCE L2/);
-  // With no other qualified user, auto reassign returns it to the queue rather than to a trainee.
+  // Auto reassign moves it away from the current owner, to the other level-2+ user.
+  assert.equal(app.cases.reassign(verify.id, 'lead').assigneeId, 'u_rafael');
+  // With no other qualified user free, it goes back to the queue rather than to a trainee.
+  app.users.setActive('u_elena', false);
   assert.equal(app.cases.reassign(verify.id, 'lead').assigneeId, undefined);
-  assert.equal(app.cases.routeUnassigned(), 1, 'the queue routes it back to the only qualified user');
+  app.users.setActive('u_elena', true);
+  assert.equal(app.cases.routeUnassigned(), 1);
   assert.equal(app.repos.tasks.require(verify.id).assigneeId, 'u_elena');
-  // Once another level-2 user exists, auto reassign moves it away from the current owner.
-  app.users.importScim([{ id: '77', userName: 'ava@planops.example', displayName: 'Ava Stone', groups: [{ display: 'skill:COMPLIANCE:2' }] }], 'okta');
-  assert.equal(app.cases.reassign(verify.id, 'lead').assigneeId, 'u_77');
 });
 
 test('sponsor verification never routes to a COMPLIANCE trainee, even when others are busy', async () => {
   const app = testApp();
-  // Load Elena up so load-balancing alone would prefer Sam.
-  for (let i = 0; i < 3; i++) {
+  // Enough work that load-balancing alone would reach Sam.
+  for (let i = 0; i < 4; i++) {
     await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ ein: `12-000000${i}` }) } }, 'portal');
   }
   const verifications = app.repos.tasks.find((t) => t.stepId === 'verify-sponsor');
-  assert.equal(verifications.length, 3);
-  assert.ok(verifications.every((t) => t.assigneeId === 'u_elena'));
+  assert.equal(verifications.length, 4);
+  assert.ok(verifications.every((t) => t.assigneeId === 'u_elena' || t.assigneeId === 'u_rafael'), 'only level-2+ users');
+  assert.ok(verifications.some((t) => t.assigneeId === 'u_rafael'), 'work is shared with the second compliance user');
 });
 
 test('contact-change call-back never routes to a COMPLIANCE trainee, even when others are busy', async () => {
@@ -85,7 +87,7 @@ test('contact-change call-back never routes to a COMPLIANCE trainee, even when o
   }
   const callbacks = app.repos.tasks.find((t) => t.stepId === 'verify-authority');
   assert.equal(callbacks.length, 3);
-  assert.ok(callbacks.every((t) => t.assigneeId === 'u_elena' && t.minSkillLevel === 2));
+  assert.ok(callbacks.every((t) => (t.assigneeId === 'u_elena' || t.assigneeId === 'u_rafael') && t.minSkillLevel === 2));
   assert.throws(() => app.cases.reassign(callbacks[0].id, 'lead', 'u_sam'), /lacks COMPLIANCE L2/);
 });
 
