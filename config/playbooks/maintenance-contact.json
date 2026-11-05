@@ -1,6 +1,6 @@
 {
   "id": "maintenance-contact",
-  "version": 1,
+  "version": 2,
   "caseType": "MAINTENANCE_CONTACT",
   "name": "Change plan contact",
   "description": "Add or replace a plan contact (e.g. new plan administrator).",
@@ -18,6 +18,7 @@
       "id": "verify-authority",
       "name": "Verify request came from an authorized contact",
       "skill": "COMPLIANCE",
+      "minSkillLevel": 2,
       "mode": "MANUAL",
       "action": { "type": "none" },
       "dependsOn": ["validate-request"],

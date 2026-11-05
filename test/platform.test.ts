@@ -74,6 +74,21 @@ test('sponsor verification never routes to a COMPLIANCE trainee, even when other
   assert.ok(verifications.every((t) => t.assigneeId === 'u_elena'));
 });
 
+test('contact-change call-back never routes to a COMPLIANCE trainee, even when others are busy', async () => {
+  const app = testApp();
+  const { plan } = await installPlan(app);
+  for (const name of ['Omar', 'Lena', 'Kofi']) {
+    await app.cases.submitIntake(
+      { caseType: 'MAINTENANCE_CONTACT', channel: 'DIGITAL', planId: plan.id, data: { contact: { role: 'PAYROLL', name, email: `${name.toLowerCase()}@acme.example` } } },
+      'portal',
+    );
+  }
+  const callbacks = app.repos.tasks.find((t) => t.stepId === 'verify-authority');
+  assert.equal(callbacks.length, 3);
+  assert.ok(callbacks.every((t) => t.assigneeId === 'u_elena' && t.minSkillLevel === 2));
+  assert.throws(() => app.cases.reassign(callbacks[0].id, 'lead', 'u_sam'), /lacks COMPLIANCE L2/);
+});
+
 test('TRAC outage: install step goes to exception; retry is idempotent', async () => {
   const app = testApp();
   const { case: kase } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } }, 'portal');
