@@ -13,9 +13,11 @@ shown in **bold**; without it they return 403 naming it. Read-only routes need
 none, except the audit log. Auditors can use every `GET` route they have
 permission for and the rule `test` and `evaluate` routes.
 
-**Client access.** Everything about plans and cases is limited to the caller's
-[clients](sign-in.md#client-access): lists are filtered, and another client's
-case, plan or task returns 404.
+**Client and plan access.** Everything about plans and cases is limited to the
+caller's [clients](sign-in.md#client-access) and to plans whose
+[allow and deny lists](sign-in.md#plan-access) let them in: lists are filtered,
+and anything else returns 404. A plan's `access` shows who is on its lists only
+to callers with `plans.restrict`; others see `{ "restricted": true }`.
 
 Errors return `{ "error": "...", "issues": [...] }` with status 401 (not signed
 in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
@@ -44,6 +46,7 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 | GET | `/api/cases/:id` | A case with its plan, tasks and audit trail |
 | POST | `/api/cases/:id/cancel` | `{ reason }` · **cases.cancel** |
 | GET | `/api/plans`, `/api/plans/:id` | Plans |
+| PUT | `/api/plans/:id/access` | `{ allow?: userIds, deny?: userIds, note }` sets who may see and work the plan; `{}` lifts the restriction. · **plans.restrict** |
 | PATCH | `/api/plans/:id` | Correct onboarding data. Only before the plan is on the recordkeeper. · **plans.edit** |
 
 Example: start an installation.

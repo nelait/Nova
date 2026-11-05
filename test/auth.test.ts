@@ -211,7 +211,7 @@ test('development mode: localhost only, no sign-in routes, admin still enforced'
 test('auditors can read everything but change nothing', async () => {
   const { cookie } = await signIn('olivia@planops.example');
   const me = await (await get('/api/me', cookie)).json();
-  assert.deepEqual([me.user.roles, me.user.readOnly, me.user.permissions], [['specialist', 'auditor'], true, ['audit.read', 'clients.all']]);
+  assert.deepEqual([me.user.roles, me.user.readOnly, me.user.permissions], [['specialist', 'auditor'], true, ['audit.read', 'clients.all', 'plans.unrestricted']]);
   for (const path of ['/api/cases', '/api/plans', '/api/audit', '/api/users', '/api/integrations/calls', '/api/outbox', '/api/insights', '/api/rules']) {
     assert.equal((await get(path, cookie)).status, 200, path);
   }

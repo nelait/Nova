@@ -10,36 +10,50 @@ import { FUNCTIONS, RuleError } from '../rules/expression.ts';
 import { IntegrationError } from '../integrations/client.ts';
 import { AgentError } from '../ai/agents.ts';
 import { AuthError } from '../auth/oidc.ts';
-import type { AuditEvent, User } from '../domain/types.ts';
+import type { AuditEvent, Plan, User } from '../domain/types.ts';
 import { PERMISSIONS, type Permission } from '../users/roles.ts';
 
 type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string; me?: User; can: (p: Permission) => boolean; scope: ClientScope }) => unknown;
 
 /**
- * Which clients' plans and cases the caller may see and act on (clients.all, or
- * their client:<id> groups). Another client's case, plan or task is reported as
- * not found rather than forbidden, so its existence isn't revealed.
+ * Which plans and cases the caller may see and act on: their clients
+ * (clients.all, or client:<id> groups), then each plan's allow and deny lists
+ * (plans.unrestricted sees past those). Anything else is reported as not found
+ * rather than forbidden, so its existence isn't revealed.
  */
 type ClientScope = ReturnType<typeof clientScope>;
+
+/**
+ * Who is on a plan's allow and deny lists is shown only to people who manage
+ * access: a deny list can reveal someone's conflict of interest. Others see only
+ * that the plan is restricted.
+ */
+function showPlan(plan: Plan, canManage: boolean): Plan | (Omit<Plan, 'access'> & { access?: { restricted: true } }) {
+  if (!plan.access || canManage) return plan;
+  return { ...plan, access: { restricted: true } };
+}
 function clientScope(app: App, me: User | undefined) {
-  const all = app.users.can(me, 'clients.all');
-  const ok = (clientId: string | undefined) => all || (!!clientId && app.users.canAccessClient(me, clientId));
-  const caseOk = (caseId: string | undefined) => all || (!!caseId && ok(app.repos.cases.get(caseId)?.clientId));
-  const planOk = (planId: string | undefined) => all || (!!planId && ok(app.repos.plans.get(planId)?.clientId));
+  /** Sees every plan of every client. */
+  const all = app.users.can(me, 'clients.all') && app.users.can(me, 'plans.unrestricted');
+  const ok = (clientId: string | undefined) => !!clientId && app.users.canAccessClient(me, clientId);
+  const plan = (p: Plan | undefined) => !!p && (all || app.users.canAccessPlan(me, p));
+  const planOk = (planId: string | undefined) => all || (!!planId && plan(app.repos.plans.get(planId)));
+  const caseOk = (caseId: string | undefined) => all || (!!caseId && planOk(app.repos.cases.get(caseId)?.planId));
   const hidden = (what: string, id: string) => new NotFoundError(`${what}/${id} not found`);
   return {
     all,
     ok,
+    plan,
     caseOk,
     planOk,
     requireCase(id: string) {
       const c = app.repos.cases.require(id);
-      if (!ok(c.clientId)) throw hidden('cases', id);
+      if (!planOk(c.planId)) throw hidden('cases', id);
       return c;
     },
     requirePlan(id: string) {
       const p = app.repos.plans.require(id);
-      if (!ok(p.clientId)) throw hidden('plans', id);
+      if (!plan(p)) throw hidden('plans', id);
       return p;
     },
     requireTask(id: string) {
@@ -117,21 +131,27 @@ route('POST', '/api/intake', ({ app, body, actor, scope }) => {
 }, { perm: 'cases.start' });
 
 // --- plans
-route('GET', '/api/plans', ({ app, scope }) => app.repos.plans.all().reverse().filter((p) => scope.ok(p.clientId)));
-route('GET', '/api/plans/:id', ({ params, scope }) => scope.requirePlan(params.id));
+route('GET', '/api/plans', ({ app, scope, can }) => app.repos.plans.all().reverse().filter(scope.plan).map((p) => showPlan(p, can('plans.restrict'))));
+route('GET', '/api/plans/:id', ({ params, scope, can }) => showPlan(scope.requirePlan(params.id), can('plans.restrict')));
+// Who may see and work a plan: { allow?: userIds, deny?: userIds, note }. Empty lists lift the restriction.
+route('PUT', '/api/plans/:id/access', ({ app, params, body, actor, scope }) => (scope.requirePlan(params.id), app.cases.setPlanAccess(params.id, body ?? {}, actor)), { perm: 'plans.restrict' });
 route('PATCH', '/api/plans/:id', ({ app, params, body, actor, scope }) => (scope.requirePlan(params.id), app.cases.updatePlanDetails(params.id, body, actor)), { perm: 'plans.edit' });
 
 // --- cases
 route('GET', '/api/cases', ({ app, scope }) =>
-  app.repos.cases.all().reverse().filter((c) => scope.ok(c.clientId)).map((c) => {
+  app.repos.cases.all().reverse().filter((c) => scope.planOk(c.planId)).map((c) => {
     const tasks = app.cases.tasksFor(c.id);
     const plan = app.repos.plans.get(c.planId);
-    return { ...c, sponsorName: plan?.details.sponsorName, progress: { done: tasks.filter((t) => t.status === 'DONE' || t.status === 'SKIPPED').length, total: tasks.length } };
+    return { ...c, sponsorName: plan?.details.sponsorName, restricted: !!plan?.access, progress: { done: tasks.filter((t) => t.status === 'DONE' || t.status === 'SKIPPED').length, total: tasks.length } };
   }),
 );
-route('GET', '/api/cases/:id', ({ app, params, scope }) => {
+route('GET', '/api/cases/:id', ({ app, params, scope, can }) => {
   const c = scope.requireCase(params.id);
-  return { case: c, plan: app.repos.plans.require(c.planId), tasks: app.cases.tasksFor(c.id), audit: app.repos.audit.find((e) => e.caseId === c.id) };
+  const plan = app.repos.plans.require(c.planId);
+  // Who could be on the plan's lists: people with access to its client (for the access editor).
+  const manage = can('plans.restrict');
+  const users = manage ? app.users.list().filter((u) => u.active && app.users.canAccessClient(u, plan.clientId)).map((u) => ({ id: u.id, name: u.name })) : undefined;
+  return { case: c, plan: showPlan(plan, manage), users, tasks: app.cases.tasksFor(c.id), audit: app.repos.audit.find((e) => e.caseId === c.id) };
 });
 route('POST', '/api/cases/:id/cancel', ({ app, params, body, actor, scope }) => (scope.requireCase(params.id), app.cases.cancelCase(params.id, actor, body.reason ?? '')), { perm: 'cases.cancel' });
 
@@ -195,7 +215,7 @@ route('GET', '/api/trac/plans', async ({ app, actor, scope }) => {
   const plans = (await app.integrations.call('trac', 'listPlans', { actor })).data as { id: string }[];
   if (scope.all) return plans;
   // Only recordkeeper plans that belong to one of the caller's clients.
-  const mine = new Set(app.repos.plans.find((p) => !!p.tracPlanId && scope.ok(p.clientId)).map((p) => p.tracPlanId));
+  const mine = new Set(app.repos.plans.find((p) => !!p.tracPlanId && scope.plan(p)).map((p) => p.tracPlanId));
   return plans.filter((p) => mine.has(p.id));
 });
 // Demo aid for the built-in mock TRAC only; never available with single sign-on.
@@ -237,7 +257,7 @@ route('GET', '/api/integrations/calls', ({ app, query, scope }) => {
   return scope.all ? app.integrations.calls(limit) : app.integrations.calls(10_000).filter((c) => scope.caseOk(c.caseId)).slice(0, limit);
 });
 route('GET', '/api/outbox', ({ app, scope }) => app.email.list().filter((e) => scope.caseOk(e.caseId)));
-route('GET', '/api/insights', ({ app, scope }) => app.insights(scope.all ? undefined : (c) => scope.ok(c.clientId)));
+route('GET', '/api/insights', ({ app, scope }) => app.insights(scope.all ? undefined : (c) => scope.planOk(c.planId)));
 // Audit log, newest first, with optional filters. format=csv downloads it for review elsewhere.
 route('GET', '/api/audit', ({ app, query, scope }) => {
   const q = (k: string) => query.get(k)?.trim() || undefined;

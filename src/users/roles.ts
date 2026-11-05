@@ -27,12 +27,14 @@ export const PERMISSIONS = {
   'integrations.test': "Test an integration's connection (calls the external system)",
   'audit.read': 'See and download the full audit log',
   'clients.all': "See and work every client's plans and cases (otherwise only those in your client:<id> groups)",
+  'plans.unrestricted': "See plans with an allow or deny list even when you're not allowed by it (within your clients)",
+  'plans.restrict': "Set a plan's allow and deny lists",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
 
 /** Permissions that only read. A read-only role keeps these and loses the rest. */
-const READ_PERMISSIONS: ReadonlySet<Permission> = new Set(['audit.read', 'clients.all']);
+const READ_PERMISSIONS: ReadonlySet<Permission> = new Set(['audit.read', 'clients.all', 'plans.unrestricted']);
 
 export interface RoleDef {
   description: string;

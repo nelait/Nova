@@ -99,7 +99,7 @@ settings, then what to put in place before real plan data goes through it.</p>
 are files under <code>config/</code>. Keep them in version control and review changes like
 code: they are your operating procedures.</p>
 <pre><code class="language-bash">npm install
-npm test            # 120 tests, including every rule set&#39;s own test cases
+npm test            # 127 tests, including every rule set&#39;s own test cases
 npm start
 </code></pre>
 <h2 id="before-production">Before production</h2>
@@ -113,8 +113,8 @@ npm start
 </thead>
 <tbody><tr>
 <td><strong>Sign-in</strong></td>
-<td>Single sign-on through OIDC or SAML 2.0 with single logout, server-side sessions, configurable roles and permissions, and per-client access (<a href="sign-in.html#roles-and-permissions">Roles</a>). Without it, development mode listens on localhost only.</td>
-<td>Per-plan access restrictions, if your service model needs them.</td>
+<td>Single sign-on through OIDC or SAML 2.0 with single logout, server-side sessions, configurable roles and permissions, and per-client and per-plan access (<a href="sign-in.html#roles-and-permissions">Roles</a>). Without it, development mode listens on localhost only.</td>
+<td>Field-level masking (for example hiding participant-level data from some roles), if you add participant data.</td>
 </tr>
 <tr>
 <td><strong>Transport security</strong></td>

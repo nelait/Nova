@@ -126,6 +126,7 @@
   body:not(.can-users-manage) .needs-users-manage,
   body:not(.can-integrations-test) .needs-integrations-test,
   body:not(.can-audit-read) .needs-audit-read,
+  body:not(.can-plans-restrict) .needs-plans-restrict,
   body:not(.dev-mode) .dev-only, body.sso .dev-only { display: none !important; }
   .who { display: flex; align-items: center; gap: 10px; }
   .who .avatar { flex: 0 0 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px; }
@@ -135,6 +136,12 @@
   .readonly-note { margin: 10px 28px 0; border: 1px solid var(--line); border-left: 4px solid var(--brass); background: var(--surface); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 14px; font-size: 14px; }
   .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; margin-bottom: 12px; }
   .filters label { font-size: 12px; color: var(--muted); }
+  .access { border: 1px solid var(--line); border-left: 4px solid var(--bad); border-radius: var(--radius-sm); padding: 10px 14px; margin: 12px 0; background: var(--surface); }
+  .access .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-top: 8px; }
+  .access fieldset { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; margin: 0; }
+  .access legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+  .access label { display: flex; gap: 6px; align-items: center; font-size: 14px; margin: 2px 0; font-weight: 400; }
+  .access input[type=checkbox] { width: auto; }
   .devnote { font-size: 12px; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 6px 8px; }
 </style>
 </head>
@@ -426,18 +433,52 @@ async function renderCases(v) {
   const cases = await api('/cases');
   v.innerHTML = `<div class="grid2"><div class="panel"><h2>Cases (${cases.length})</h2><div id="list"></div></div><div class="panel" id="detail"><p class="muted">Select a case.</p></div></div>`;
   $('#list').innerHTML = cases.map((c) => `<div class="item ${state.selCase === c.id ? 'sel' : ''}" data-id="${c.id}"><b>${esc(c.sponsorName)}</b>
-    <div class="small muted">${c.type} · ${c.channel} · ${fmtDate(c.createdAt)}</div><div class="small"><span class="chip ${c.status}">${c.status}</span>${c.progress.done}/${c.progress.total} steps</div></div>`).join('') || '<p class="muted">No cases yet.</p>';
+    <div class="small muted">${c.type} · ${c.channel} · ${fmtDate(c.createdAt)}</div><div class="small"><span class="chip ${c.status}">${c.status}</span>${c.restricted ? '<span class="chip exception" title="This plan has an allow or deny list">Restricted</span>' : ''}${c.progress.done}/${c.progress.total} steps</div></div>`).join('') || '<p class="muted">No cases yet.</p>';
   $('#list').onclick = (e) => { const it = e.target.closest('.item'); if (it) { state.selCase = it.dataset.id; renderCases(v); } };
   if (!state.selCase) return;
   const d = await api('/cases/' + state.selCase);
   $('#detail').innerHTML = `<h2>${esc(d.plan.details.sponsorName)} — ${d.case.type}</h2>
     <div class="small muted">Case ${d.case.id} · playbook ${d.case.playbookId} v${d.case.playbookVersion} · plan <span class="chip ${d.plan.status}">${d.plan.status}</span>${d.plan.tracPlanId ? ' · ' + d.plan.tracPlanId : ''}</div>
+    ${accessPanel(d.plan, d.users)}
     <h3>Steps</h3><div class="steps">${d.tasks.map((t) => `<div class="step"><div><b>${esc(t.name)}</b><div class="small muted">${t.skill}${t.minSkillLevel > 1 ? ' L' + t.minSkillLevel + '+' : ''} · ${t.assigneeId ?? (t.status === 'READY' && t.mode !== 'AUTO' ? 'unassigned queue' : '—')}</div>
       ${t.exception ? `<div class="small" style="color:var(--bad)">${esc(t.exception)}</div>` : ''}
       ${t.status === 'SKIPPED' ? (() => { const h = t.history.find((x) => x.event === 'skipped' && x.detail?.condition); return h ? `<div class="small muted">Skipped: condition not met (<code>${esc(h.detail.condition)}</code>)</div>` : '<div class="small muted">Skipped: case cancelled</div>'; })() : ''}</div><div><span class="chip ${t.mode}">${t.mode}</span>${statusChip(t)}</div></div>`).join('')}</div>
     ${d.case.status === 'OPEN' ? '<div class="actions needs-cases-cancel"><button class="btn secondary" id="cancel">Cancel case</button></div>' : ''}
     <h3>Audit trail</h3><div class="scroll"><table><tr><th>When</th><th>Who</th><th>Event</th><th>Detail</th></tr>${d.audit.map((a) => `<tr><td class="small">${fmtDate(a.at)}</td><td class="small">${esc(a.actor)}</td><td class="small">${esc(a.event)}</td><td class="small muted">${esc(a.detail ? JSON.stringify(a.detail).slice(0, 140) : '')}</td></tr>`).join('')}</table></div>`;
   $('#cancel')?.addEventListener('click', () => guarded(async () => { const reason = prompt('Reason for cancelling?'); if (!reason) return; await api(`/cases/${state.selCase}/cancel`, { method: 'POST', body: { reason } }); render(); }));
+  bindAccessPanel(d.plan);
+}
+
+/** A plan's allow / deny lists: shown when set; editable with plans.restrict. */
+function accessPanel(plan, users) {
+  const a = plan.access || {};
+  const name = (id) => esc(users?.find((u) => u.id === id)?.name ?? id);
+  const summary = !plan.access
+    ? '<b>Plan access:</b> everyone with access to this client.'
+    : a.restricted
+      ? '<b>Restricted plan.</b> Only some people may see and work it.'
+      : `<b>Restricted plan.</b> ${a.allow ? `Only ${a.allow.map(name).join(', ')} may see and work it.` : ''} ${a.deny ? `${a.deny.map(name).join(', ')} may not.` : ''}${a.note ? `<div class="small muted">${esc(a.note)}</div>` : ''}`;
+  const editor = users && can('plans.restrict') ? `<details class="needs-plans-restrict" style="margin-top:8px"><summary class="small">Change who can see this plan</summary>
+      <div class="lists">
+        <fieldset><legend>Only these people (leave empty for everyone)</legend>${users.map((u) => `<label><input type="checkbox" name="allow" value="${u.id}" ${a.allow?.includes(u.id) ? 'checked' : ''}>${esc(u.name)}</label>`).join('')}</fieldset>
+        <fieldset><legend>Never these people (conflict of interest)</legend>${users.map((u) => `<label><input type="checkbox" name="deny" value="${u.id}" ${a.deny?.includes(u.id) ? 'checked' : ''}>${esc(u.name)}</label>`).join('')}</fieldset>
+      </div>
+      <label for="accessNote" class="small" style="margin-top:8px">Why (required to restrict)</label><input id="accessNote" value="${esc(a.note ?? '')}">
+      <div class="actions"><button class="btn" id="saveAccess">Save access</button>${plan.access ? '<button class="btn secondary" id="liftAccess">Lift restriction</button>' : ''}</div></details>` : '';
+  if (!plan.access && !can('plans.restrict')) return '';
+  return `<div class="access" style="${plan.access ? '' : 'border-left-color:var(--line)'}">${summary}${editor}</div>`;
+}
+function bindAccessPanel(plan) {
+  const save = (body) => guarded(async () => {
+    const r = await api(`/plans/${plan.id}/access`, { method: 'PUT', body });
+    toast(r.access ? 'Plan access saved. Open tasks were rerouted if needed.' : 'Restriction lifted');
+    render();
+  });
+  $('#saveAccess')?.addEventListener('click', () => {
+    const picked = (n) => [...document.querySelectorAll(`.access input[name=${n}]:checked`)].map((x) => x.value);
+    save({ allow: picked('allow'), deny: picked('deny'), note: $('#accessNote').value });
+  });
+  $('#liftAccess')?.addEventListener('click', () => save({}));
 }
 
 // ---------------------------------------------------------------- team

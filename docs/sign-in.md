@@ -151,6 +151,8 @@ levels.
 | `integrations.test` | Test an integration's connection, which calls the external system |
 | `audit.read` | See and download the full **Audit log** |
 | `clients.all` | See and work every client's plans and cases; without it, only the clients in your `client:<id>` groups (see [Client access](#client-access)) |
+| `plans.unrestricted` | See plans with an allow or deny list even when the lists leave you out (within your clients; see [Plan access](#plan-access)) |
+| `plans.restrict` | Set a plan's allow and deny lists |
 
 Everyone signed in can see, for the clients they have access to, cases and
 their audit trails, plans, emails, integration calls and insights; and rules,
@@ -164,8 +166,8 @@ integrations and agents, and run a rule set's tests.
 | **supervisor** | `role:supervisor` | `tasks.reassign`, `cases.cancel`, `plans.edit`, `audit.read`, `clients.all` |
 | **user-admin** | `role:user-admin` | `users.manage`, `audit.read` |
 | **integration-admin** | `role:integration-admin` | `integrations.test` |
-| **admin** | `role:admin` | Everything |
-| **auditor** | `role:auditor` | `audit.read`, `clients.all`, and **read-only**: every permission that changes something is removed, whatever other roles the person has, and they are never routed work |
+| **admin** | `role:admin` | Everything, including `plans.restrict` and `plans.unrestricted` |
+| **auditor** | `role:auditor` | `audit.read`, `clients.all`, `plans.unrestricted`, and **read-only**: every permission that changes something is removed, whatever other roles the person has, and they are never routed work |
 
 **Read-only wins.** Someone with both `role:auditor` and `role:admin` is
 read-only, so adding a group can't quietly give an audit account write access.
@@ -196,6 +198,31 @@ both; **Elena** (supervisor) and **Priya** (admin) see everything.
 
 To keep everyone seeing every client, as before, add `clients.all` to
 `specialist` in `config/roles.json`.
+
+### Plan access
+
+Within a client, a single plan can be restricted further:
+
+- **Allow list** (a confidential plan, such as your own company's plan or an executive plan): only the people on it may see and work the plan.
+- **Deny list** (a conflict of interest, such as a specialist whose relative works for the sponsor): the people on it may never see or work the plan, even if they are on the allow list.
+
+Client access still comes first: being on a plan's allow list doesn't give
+someone a client they don't have. Supervisors are bound by the lists like
+everyone else; only `plans.unrestricted` (auditors and admins) sees past them,
+so audit stays complete.
+
+Someone with `plans.restrict` (admins) sets the lists on the case screen under
+**Change who can see this plan**, or with `PUT /api/plans/:id/access`. A reason
+is required, and the change is audited as `plan.access-changed`.
+
+- Everything about a restricted plan (the plan, its cases, tasks, emails, integration calls, recordkeeper record, insights and audit events) is **"not found"** for people the lists keep out, exactly like another client's.
+- **Routing** gives the plan's tasks only to people allowed on it. If nobody allowed has the skill, the task waits in the unassigned queue, and the reason says so.
+- **Changing the lists takes effect at once:** open tasks held by someone who loses access go back through routing, and they can't be reassigned to them.
+- Cases show a **Restricted** marker. **Who is on the lists is shown only to people with `plans.restrict`**: a deny list can reveal someone's conflict of interest, so everyone else sees only that the plan is restricted. (The full lists are also in the audit log, for people with `audit.read`.)
+
+In the demo, Cedar Ridge Health Partners is open only to Priya, Elena, Sam and
+Dana, and Marcus is kept off Tidewater Logistics for a (fictional) conflict of
+interest. Marcus sees neither; Rafael sees Tidewater, marked Restricted.
 
 ### Changing roles
 

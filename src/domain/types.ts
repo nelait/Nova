@@ -51,9 +51,22 @@ export interface PlanDetails {
   fees: FeeSchedule;
 }
 
+/**
+ * Who may see and work one plan, on top of client access. `allow`: only these
+ * people (a confidential plan). `deny`: never these people (a conflict of
+ * interest). Set by someone with the plans.restrict permission.
+ */
+export interface PlanAccess {
+  allow?: string[];
+  deny?: string[];
+  /** Why, for the people who look after access (shown with the lists). */
+  note?: string;
+}
+
 export interface Plan {
   id: string;
   clientId: string;
+  access?: PlanAccess;
   status: PlanStatus;
   details: PlanDetails;
   tracPlanId?: string;

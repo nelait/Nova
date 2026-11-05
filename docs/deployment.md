@@ -25,7 +25,7 @@ code: they are your operating procedures.
 
 ```bash
 npm install
-npm test            # 120 tests, including every rule set's own test cases
+npm test            # 127 tests, including every rule set's own test cases
 npm start
 ```
 
@@ -33,7 +33,7 @@ npm start
 
 | Area | Today | Needed |
 |---|---|---|
-| **Sign-in** | Single sign-on through OIDC or SAML 2.0 with single logout, server-side sessions, configurable roles and permissions, and per-client access ([Roles](sign-in.md#roles-and-permissions)). Without it, development mode listens on localhost only. | Per-plan access restrictions, if your service model needs them. |
+| **Sign-in** | Single sign-on through OIDC or SAML 2.0 with single logout, server-side sessions, configurable roles and permissions, and per-client and per-plan access ([Roles](sign-in.md#roles-and-permissions)). Without it, development mode listens on localhost only. | Field-level masking (for example hiding participant-level data from some roles), if you add participant data. |
 | **Transport security** | Plain HTTP; cookies are `Secure` when the redirect URI is `https`. | A TLS-terminating proxy or load balancer in front. |
 | **Database** | SQLite with JSON documents. | Postgres with real tables (services use only the storage interface), backups and retention rules. |
 | **External calls** | Run inline when a step becomes ready, with a lock per case. | A durable job queue so slow systems don't hold requests open and work survives restarts; reconciliation with the recordkeeper. |

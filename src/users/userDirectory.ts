@@ -1,4 +1,4 @@
-import type { SkillGrant, User } from '../domain/types.ts';
+import type { Plan, SkillGrant, User } from '../domain/types.ts';
 import type { Collection } from '../store/db.ts';
 import { ValidationError } from '../store/db.ts';
 import type { Permission, RoleModel } from './roles.ts';
@@ -72,9 +72,22 @@ export class UserDirectory {
     return this.roles.can(u, 'clients.all') || (u.clients ?? []).includes(clientId);
   }
 
-  /** People who may be given this client's tasks. */
-  workersFor(clientId: string): User[] {
-    return this.workers().filter((u) => this.canAccessClient(u, clientId));
+  /**
+   * May this person see and work this plan? They need its client first. Then a
+   * deny list always keeps them out, and an allow list lets in only those on it;
+   * plans.unrestricted (auditors, admins) sees past both.
+   */
+  canAccessPlan(u: User | undefined, plan: Pick<Plan, 'clientId' | 'access'>): boolean {
+    if (!u || !this.canAccessClient(u, plan.clientId)) return false;
+    if (this.roles.can(u, 'plans.unrestricted')) return true;
+    const a = plan.access;
+    if (a?.deny?.includes(u.id)) return false;
+    return !a?.allow?.length || a.allow.includes(u.id);
+  }
+
+  /** People who may be given this plan's tasks. */
+  workersFor(plan: Pick<Plan, 'clientId' | 'access'>): User[] {
+    return this.workers().filter((u) => this.canAccessPlan(u, plan));
   }
 
   /**

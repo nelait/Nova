@@ -319,6 +319,11 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
     },
   });
 
+  // Per-plan access (set by Priya, an admin): a sponsor that asked for a named
+  // service team, and a conflict of interest.
+  app.cases.setPlanAccess(installed['Cedar Ridge Health Partners'], { allow: ['u_priya', 'u_elena', 'u_sam', 'u_dana'], note: 'Sponsor contract requires a named service team (fictional example).' }, 'u_priya');
+  app.cases.setPlanAccess(installed['Tidewater Logistics Co.'], { deny: ['u_marcus'], note: "Conflict of interest: a close relative works in the sponsor's HR team (fictional example)." }, 'u_priya');
+
   // Pre-generate Claude panels for a few open tasks so they show immediately.
   for (const t of app.repos.tasks.find((t) => (t.status === 'READY' || t.status === 'IN_PROGRESS') && !!t.assigneeId)) {
     if (['fee-disclosure', 'calculate-fees', 'verify-authority', 'validate-intake', 'review-lineup'].includes(t.stepId)) await app.ai.assist(t.id, t.assigneeId!);

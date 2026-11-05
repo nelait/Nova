@@ -1,4 +1,4 @@
-import type { AuditEvent, Case, Plan, PlanDetails, Task, User } from '../domain/types.ts';
+import type { AuditEvent, Case, Plan, PlanAccess, PlanDetails, Task, User } from '../domain/types.ts';
 import { addHours, newId, type Clock } from '../domain/util.ts';
 import { Collection, ValidationError } from '../store/db.ts';
 import type { KnowledgeBase } from '../knowledge/knowledgeBase.ts';
@@ -206,6 +206,42 @@ export class CaseService {
     return next;
   }
 
+  /**
+   * Set who may see and work a plan. Open tasks held by someone who loses access
+   * go back through routing straight away.
+   */
+  setPlanAccess(planId: string, access: PlanAccess, by: string): Plan {
+    const plan = this.r.plans.require(planId);
+    const clean = (xs: unknown): string[] | undefined => {
+      if (xs === undefined || xs === null) return undefined;
+      if (!Array.isArray(xs) || xs.some((x) => typeof x !== 'string')) throw new ValidationError('allow and deny must be lists of user ids');
+      const unknown = xs.filter((id) => !this.users.get(id));
+      if (unknown.length) throw new ValidationError(`Unknown users: ${unknown.join(', ')}`);
+      const list = [...new Set(xs as string[])];
+      return list.length ? list : undefined;
+    };
+    const allow = clean(access.allow);
+    const deny = clean(access.deny);
+    const both = (allow ?? []).filter((id) => deny?.includes(id));
+    if (both.length) throw new ValidationError(`On both the allow and the deny list: ${both.join(', ')}`);
+    const note = typeof access.note === 'string' && access.note.trim() ? access.note.trim().slice(0, 500) : undefined;
+    if ((allow || deny) && !note) throw new ValidationError('Say why the plan is restricted (note)');
+    const next: Plan = { ...plan, access: allow || deny ? { ...(allow ? { allow } : {}), ...(deny ? { deny } : {}), note } : undefined, updatedAt: this.now() };
+    if (!next.access) delete next.access;
+    this.r.plans.update(next);
+    this.audit(by, 'plan', planId, 'plan.access-changed', { from: plan.access ?? null, to: next.access ?? null });
+
+    // Anyone who can no longer see the plan gives up its open tasks.
+    const affected = new Set<string>();
+    for (const t of this.r.tasks.find((t) => t.planId === planId && OPEN.includes(t.status) && !!t.assigneeId)) {
+      if (this.users.canAccessPlan(this.users.get(t.assigneeId!), next)) continue;
+      this.save(t, { assigneeId: undefined, status: 'READY', startedAt: undefined }, by, 'reassigned', { from: t.assigneeId, to: null, reason: 'lost access to the plan' });
+      affected.add(t.caseId);
+    }
+    for (const caseId of affected) this.routeUnassigned(caseId);
+    return this.r.plans.require(planId);
+  }
+
   // ---------------------------------------------------------------- engine
 
   /** Unblock tasks whose dependencies are done, run AUTO tasks, route human tasks, close the case. */
@@ -323,9 +359,9 @@ export class CaseService {
     // Only people who may be given tasks (roles) for this case's client, then by skill (router).
     const pending = this.r.tasks.find((t) => t.status === 'READY' && !t.assigneeId && this.needsHuman(t) && (!caseId || t.caseId === caseId));
     for (const t of pending) {
-      const clientId = this.r.cases.require(t.caseId).clientId;
-      const decision = routeTask(t, this.users.workersFor(clientId), this.openLoad(), [], this.lastAssigned());
-      if (!decision.assigneeId) decision.reason = `${decision.reason} with access to client ${clientId}`;
+      const plan = this.r.plans.require(t.planId);
+      const decision = routeTask(t, this.users.workersFor(plan), this.openLoad(), [], this.lastAssigned());
+      if (!decision.assigneeId) decision.reason = `${decision.reason} with access to client ${plan.clientId}${plan.access?.allow?.length || plan.access?.deny?.length ? ' and this restricted plan' : ''}`;
       if (decision.assigneeId) {
         this.save(t, { assigneeId: decision.assigneeId }, 'router', 'assigned', { to: decision.assigneeId, reason: decision.reason });
         routed++;
@@ -428,10 +464,11 @@ export class CaseService {
       if (!u?.active) throw new ValidationError(`User ${target} is not active`);
       if (!this.users.can(u, 'tasks.work')) throw new ValidationError(`${u.name} can't be given tasks (no tasks.work permission; auditors are read-only)`);
       if (!u.skills.some((s) => s.skill === t.skill && s.level >= t.minSkillLevel)) throw new ValidationError(`${u.name} lacks ${t.skill} L${t.minSkillLevel}`);
-      const clientId = this.r.cases.require(t.caseId).clientId;
-      if (!this.users.canAccessClient(u, clientId)) throw new ValidationError(`${u.name} doesn't have access to client ${clientId}`);
+      const plan = this.r.plans.require(t.planId);
+      if (!this.users.canAccessClient(u, plan.clientId)) throw new ValidationError(`${u.name} doesn't have access to client ${plan.clientId}`);
+      if (!this.users.canAccessPlan(u, plan)) throw new ValidationError(`${u.name} doesn't have access to this restricted plan`);
     } else {
-      target = routeTask(t, this.users.workersFor(this.r.cases.require(t.caseId).clientId), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;
+      target = routeTask(t, this.users.workersFor(this.r.plans.require(t.planId)), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;
     }
     return this.save(t, { assigneeId: target, status: 'READY', startedAt: undefined }, by, 'reassigned', { from: t.assigneeId, to: target ?? null });
   }

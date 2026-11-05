@@ -30,6 +30,11 @@ Yes. Give people `client:<clientId>` groups for the clients they serve; they
 then see and are routed only those clients' work. Supervisors and admins see all
 clients. See [Client access](sign-in.md#client-access).
 
+**One plan is confidential, or someone has a conflict of interest with a sponsor. Can we restrict just that plan?**
+Yes. An admin sets the plan's allow list (only these people) or deny list
+(never these people) on the case screen; open tasks move away from anyone who
+loses access. See [Plan access](sign-in.md#plan-access).
+
 **How do people sign in?**
 Through your identity provider, with OpenID Connect (Okta, Entra ID, Google
 Workspace, Ping, Auth0) or SAML 2.0 (ADFS, Shibboleth, or SAML apps in those

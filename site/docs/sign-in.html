@@ -308,6 +308,14 @@ levels.</p>
 <td><code>clients.all</code></td>
 <td>See and work every client&#39;s plans and cases; without it, only the clients in your <code>client:&lt;id&gt;</code> groups (see <a href="#client-access">Client access</a>)</td>
 </tr>
+<tr>
+<td><code>plans.unrestricted</code></td>
+<td>See plans with an allow or deny list even when the lists leave you out (within your clients; see <a href="#plan-access">Plan access</a>)</td>
+</tr>
+<tr>
+<td><code>plans.restrict</code></td>
+<td>Set a plan&#39;s allow and deny lists</td>
+</tr>
 </tbody></table></div>
 <p>Everyone signed in can see, for the clients they have access to, cases and
 their audit trails, plans, emails, integration calls and insights; and rules,
@@ -344,12 +352,12 @@ integrations and agents, and run a rule set&#39;s tests.</p>
 <tr>
 <td><strong>admin</strong></td>
 <td><code>role:admin</code></td>
-<td>Everything</td>
+<td>Everything, including <code>plans.restrict</code> and <code>plans.unrestricted</code></td>
 </tr>
 <tr>
 <td><strong>auditor</strong></td>
 <td><code>role:auditor</code></td>
-<td><code>audit.read</code>, <code>clients.all</code>, and <strong>read-only</strong>: every permission that changes something is removed, whatever other roles the person has, and they are never routed work</td>
+<td><code>audit.read</code>, <code>clients.all</code>, <code>plans.unrestricted</code>, and <strong>read-only</strong>: every permission that changes something is removed, whatever other roles the person has, and they are never routed work</td>
 </tr>
 </tbody></table></div>
 <p><strong>Read-only wins.</strong> Someone with both <code>role:auditor</code> and <code>role:admin</code> is
@@ -377,6 +385,28 @@ see the premium client&#39;s Quill &amp; Ink Publishing plan; <strong>Sam</stron
 both; <strong>Elena</strong> (supervisor) and <strong>Priya</strong> (admin) see everything.</p>
 <p>To keep everyone seeing every client, as before, add <code>clients.all</code> to
 <code>specialist</code> in <code>config/roles.json</code>.</p>
+<h3 id="plan-access">Plan access</h3>
+<p>Within a client, a single plan can be restricted further:</p>
+<ul>
+<li><strong>Allow list</strong> (a confidential plan, such as your own company&#39;s plan or an executive plan): only the people on it may see and work the plan.</li>
+<li><strong>Deny list</strong> (a conflict of interest, such as a specialist whose relative works for the sponsor): the people on it may never see or work the plan, even if they are on the allow list.</li>
+</ul>
+<p>Client access still comes first: being on a plan&#39;s allow list doesn&#39;t give
+someone a client they don&#39;t have. Supervisors are bound by the lists like
+everyone else; only <code>plans.unrestricted</code> (auditors and admins) sees past them,
+so audit stays complete.</p>
+<p>Someone with <code>plans.restrict</code> (admins) sets the lists on the case screen under
+<strong>Change who can see this plan</strong>, or with <code>PUT /api/plans/:id/access</code>. A reason
+is required, and the change is audited as <code>plan.access-changed</code>.</p>
+<ul>
+<li>Everything about a restricted plan (the plan, its cases, tasks, emails, integration calls, recordkeeper record, insights and audit events) is <strong>&quot;not found&quot;</strong> for people the lists keep out, exactly like another client&#39;s.</li>
+<li><strong>Routing</strong> gives the plan&#39;s tasks only to people allowed on it. If nobody allowed has the skill, the task waits in the unassigned queue, and the reason says so.</li>
+<li><strong>Changing the lists takes effect at once:</strong> open tasks held by someone who loses access go back through routing, and they can&#39;t be reassigned to them.</li>
+<li>Cases show a <strong>Restricted</strong> marker. <strong>Who is on the lists is shown only to people with <code>plans.restrict</code></strong>: a deny list can reveal someone&#39;s conflict of interest, so everyone else sees only that the plan is restricted. (The full lists are also in the audit log, for people with <code>audit.read</code>.)</li>
+</ul>
+<p>In the demo, Cedar Ridge Health Partners is open only to Priya, Elena, Sam and
+Dana, and Marcus is kept off Tidewater Logistics for a (fictional) conflict of
+interest. Marcus sees neither; Rafael sees Tidewater, marked Restricted.</p>
 <h3 id="changing-roles">Changing roles</h3>
 <p>Edit <code>config/roles.json</code> and restart. For example, to let only supervisors
 override failed automatic steps, remove <code>tasks.override</code> from <code>specialist</code> and

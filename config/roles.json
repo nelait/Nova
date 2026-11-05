@@ -22,8 +22,8 @@
       "permissions": ["*"]
     },
     "auditor": {
-      "description": "Read-only: see every client and the full audit log, and change nothing. Never routed work.",
-      "permissions": ["audit.read", "clients.all"],
+      "description": "Read-only: see every client and plan, including restricted ones, and the full audit log; change nothing. Never routed work.",
+      "permissions": ["audit.read", "clients.all", "plans.unrestricted"],
       "readOnly": true
     }
   }

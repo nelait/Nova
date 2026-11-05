@@ -91,7 +91,7 @@ person may see and be given; see <a href="sign-in.html#client-access">Client acc
 <a href="sign-in.html">Sign-in</a>. Deactivated users are signed out at once.</p>
 <h2 id="how-work-is-routed">How work is routed</h2>
 <ol>
-<li><strong>Eligible:</strong> active, has the <code>tasks.work</code> permission (not an auditor), has access to the case&#39;s client, holds the step&#39;s skill at or above its minimum level, and below capacity.</li>
+<li><strong>Eligible:</strong> active, has the <code>tasks.work</code> permission (not an auditor), has access to the case&#39;s client and plan (allow and deny lists), holds the step&#39;s skill at or above its minimum level, and below capacity.</li>
 <li><strong>Least loaded:</strong> the lowest ratio of open tasks to capacity.</li>
 <li><strong>Ties rotate:</strong> among equally loaded people, whoever was assigned work least recently goes next. Seniority does not win ties, so work is shared evenly.</li>
 <li><strong>Deterministic:</strong> the final tie-break is the user id.</li>

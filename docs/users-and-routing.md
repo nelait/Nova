@@ -48,7 +48,7 @@ person may see and be given; see [Client access](sign-in.md#client-access). Peop
 
 ## How work is routed
 
-1. **Eligible:** active, has the `tasks.work` permission (not an auditor), has access to the case's client, holds the step's skill at or above its minimum level, and below capacity.
+1. **Eligible:** active, has the `tasks.work` permission (not an auditor), has access to the case's client and plan (allow and deny lists), holds the step's skill at or above its minimum level, and below capacity.
 2. **Least loaded:** the lowest ratio of open tasks to capacity.
 3. **Ties rotate:** among equally loaded people, whoever was assigned work least recently goes next. Seniority does not win ties, so work is shared evenly.
 4. **Deterministic:** the final tie-break is the user id.
