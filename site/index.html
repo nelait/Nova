@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Plan Ops Hub</title>
+<meta name="description" content="Plan Ops Hub runs retirement plan onboarding, changes and terminations through one governed workflow: rules, integrations, AI agents and people, with a complete audit trail." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="#top"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="#how">How it works</a>
+      <a href="#controls">Controls</a>
+      <a href="docs/index.html">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme">
+      <button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <div class="eyebrow">For recordkeepers, TPAs and plan service teams</div>
+        <h1>Run every plan change through one governed workflow</h1>
+        <p class="lede">Plan Ops Hub turns each sponsor request (a new plan, a fund change, a termination) into a sequence of steps. It routes the human work to people with the right skills, automates the rest, and commits the result to your recordkeeper.</p>
+        <div class="cta">
+          <a class="btn" href="docs/getting-started.html">Run the demo</a>
+          <a class="btn ghost" href="docs/index.html">Read the docs</a>
+        </div>
+      </div>
+
+      <div class="ledger" aria-label="Example case: a fund lineup change moving through its steps">
+        <div class="ledger-head"><b>Cedar Ridge Health Partners · fund lineup change</b><span>403(b) · effective 2027-01-15</span></div>
+        <ol>
+          <li><span class="kind rules">Rules</span><div>Validate the change<small>Exactly one QDIA in the new lineup; notice window checked</small></div><span class="state done">done</span></li>
+          <li><span class="kind agent">AI agent</span><div>Propose fund mapping<small>Looked up the removed and new funds in the fund catalog</small></div><span class="state done">proposed</span></li>
+          <li class="approved"><span class="kind person">Person</span><div>Approve mapping: FSPSX → FTIHX<small>Sam Okafor, Investments L3 · approved unchanged</small></div><span class="state done">approved</span></li>
+          <li><span class="kind rules">Rules</span><div>Check the approved mapping<small>Every removed fund mapped once, into the new lineup</small></div><span class="state done">done</span></li>
+          <li><span class="kind person">Person</span><div>Send participant notice<small>30 to 60 days before the change, ERISA 404(c)(4)</small></div><span class="state ready">ready</span></li>
+          <li><span class="kind system">TRAC</span><div>Apply new lineup on the recordkeeper<small>PATCH /plans/TRAC-100002 with an idempotency key</small></div><span class="state wait">waiting</span></li>
+        </ol>
+        <div class="ledger-foot">Every step, approval and external call is in the case's audit trail.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="how">
+    <div class="wrap">
+      <div class="eyebrow">How it works</div>
+      <h2>One request, four kinds of step</h2>
+      <p class="intro">Each process is a playbook of steps. Every step is one of four kinds, and each step passes its result to the steps after it.</p>
+      <div class="cols4">
+        <div class="steptype"><span class="kind system">Integration</span><h3>Call your systems</h3><p>Read from or write to the recordkeeper, a fund catalog or a CRM. The address, sign-in, retries and request mapping are configuration.</p><p class="eg">Install the plan on TRAC with an idempotency key, so a retry never creates a second plan.</p></div>
+        <div class="steptype"><span class="kind rules">Rules</span><h3>Apply your rules</h3><p>Validations, fee calculations and decision tables, written in a small, safe formula language. Every rule set has its own test cases.</p><p class="eg">Flag a contact change to a free-mail address as a possible fraud attempt.</p></div>
+        <div class="steptype"><span class="kind agent">AI agent</span><h3>Let AI propose</h3><p>An agent sees only the data you give it and can only look things up. What it produces is a proposal for a person to approve.</p><p class="eg">Propose where balances in removed funds should move, with a reason for each.</p></div>
+        <div class="steptype"><span class="kind person">Person</span><h3>Keep people in charge</h3><p>Reviews, call-backs and approvals go to someone with the right skill and level, with guidance and a checklist.</p><p class="eg">Only Compliance level 2 or above can verify a plan sponsor.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band alt">
+    <div class="wrap">
+      <div class="eyebrow">Plan lifecycle</div>
+      <h2>From onboarding to deconversion</h2>
+      <p class="intro">Five processes cover a plan's time with you. Each is a versioned playbook, and any client can have its own variant.</p>
+      <div class="lifecycle">
+        <div>
+          <div class="reg">ERISA 408(b)(2) · QDIA</div>
+          <h3>Onboarding</h3>
+          <ul>
+            <li>Validate the application and classify the plan by size</li>
+            <li>Check every fund against the fund catalog</li>
+            <li>Verify the sponsor and the authorized signer</li>
+            <li>Send the fee disclosure and the welcome email</li>
+            <li>Install the plan on the recordkeeper</li>
+          </ul>
+        </div>
+        <div>
+          <div class="reg">404(c)(4) notice: 30–60 days</div>
+          <h3>Plan changes</h3>
+          <ul>
+            <li>Contact changes, with a call-back to the number on file</li>
+            <li>Fund lineup changes, with an AI-proposed fund mapping</li>
+            <li>Fee changes, with an updated disclosure</li>
+            <li>Every change applied on the recordkeeper</li>
+          </ul>
+        </div>
+        <div>
+          <div class="reg">ERISA 101(i) blackout notice: 30+ days</div>
+          <h3>Termination</h3>
+          <ul>
+            <li>Verify the board's authorization</li>
+            <li>Calculate prorated fees for review</li>
+            <li>Send the blackout notice and the confirmation</li>
+            <li>Terminate the plan on the recordkeeper</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="controls">
+    <div class="wrap">
+      <div class="eyebrow">Controls</div>
+      <h2>Built for work that gets audited</h2>
+      <p class="intro">Plan operations is regulated work. These safeguards are part of the engine, so nobody has to remember to switch them on.</p>
+      <div class="controls">
+        <div><h3>AI proposes, people approve</h3><p>Steps that run an AI agent must be review steps. Nothing an agent produces is used until a person approves it, and AI never decides which steps run.</p></div>
+        <div><h3>Facts can't go missing</h3><p>Every value a template puts in an email (a fee, a date, a ticker) must still be there after anyone edits it, or the email can't be sent.</p></div>
+        <div><h3>Qualified people only</h3><p>Steps can require a minimum skill level. Every compliance step needs level 2 or above, and a test keeps it that way.</p></div>
+        <div><h3>Retries never double-post</h3><p>Writes to external systems carry an idempotency key, so a step retried after a timeout is applied once.</p></div>
+        <div><h3>Failures go to a person</h3><p>When an automatic step fails, the case doesn't stall. The step goes to someone with the reason, who can fix and retry, or override with a written justification.</p></div>
+        <div><h3>A complete audit trail</h3><p>Every routing decision, approval, edit, override and external call is recorded with who, when and why.</p></div>
+        <div><h3>Secrets stay out of config</h3><p>Credentials come only from environment variables. The app shows whether a secret is set, never its value, and call logs never store request bodies.</p></div>
+        <div><h3>Agents see only what they need</h3><p>Each AI agent receives only the case fields its configuration lists, so details like EINs and contact emails are never sent to it.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band alt">
+    <div class="wrap">
+      <div class="eyebrow">The product</div>
+      <h2>What your team works in</h2>
+      <p class="intro">Each person sees the work routed to them, with the guidance, checklist and prepared work for each task.</p>
+      <div class="shots">
+        <figure><img src="assets/screens/agent-proposal.png" alt="A task showing an AI-proposed fund mapping with its rationale, the lookups the agent made, and Approve and Run agent again buttons" loading="lazy" /><figcaption><b>AI agent step.</b> A proposed fund mapping, waiting for an investment specialist's approval.</figcaption></figure>
+        <figure><img src="assets/screens/rules.png" alt="The Rules screen showing a decision table, calculated outputs and validation rules for new plan onboarding" loading="lazy" /><figcaption><b>Rules.</b> The decision table, formulas and checks behind a step, with their test results.</figcaption></figure>
+        <figure><img src="assets/screens/integrations.png" alt="The Integrations screen listing the recordkeeper and fund catalog, their operations, and recent calls" loading="lazy" /><figcaption><b>Integrations.</b> Each connected system, its operations, and every call made.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap config">
+      <div>
+        <div class="eyebrow">Configure, don't code</div>
+        <h2>Your operating procedures, as reviewable files</h2>
+        <ol>
+          <li>Describe each process as a playbook: steps, skills, dependencies and conditions.</li>
+          <li>Write rules as formulas, with test cases that run on every change.</li>
+          <li>Connect a system by describing its operations, with no adapter code.</li>
+          <li>Give a client its own variant of any process, template or rule set.</li>
+        </ol>
+        <p><a href="docs/playbooks.html">Process definitions reference →</a></p>
+      </div>
+      <pre><code>{
+  "id": "email-domain",
+  "severity": "warning",
+  "when": "outputs.currentDomain != null",
+  "assert": "outputs.newDomain == outputs.currentDomain",
+  "message": "New contact uses {{outputs.newDomain}}, not the
+    sponsor's domain {{outputs.currentDomain}}. Treat as a
+    possible fraud attempt until the call-back is done.",
+  "reference": "Firm fraud-prevention policy"
+}</code></pre>
+    </div>
+  </section>
+
+  <section class="band alt">
+    <div class="wrap">
+      <div class="eyebrow">Get started</div>
+      <h2>Up and running in an afternoon</h2>
+      <p class="intro">Start with the demo and its sample cases, then connect your own systems and team.</p>
+      <div class="start">
+        <a href="docs/getting-started.html"><h3>Run the demo</h3><p><code>npm run demo</code> loads 15 sample cases and a team of six.</p></a>
+        <a href="docs/integrations.html"><h3>Connect your recordkeeper</h3><p>Set <code>TRAC_BASE_URL</code> and <code>TRAC_API_KEY</code>. Nothing else changes.</p></a>
+        <a href="docs/users-and-routing.html"><h3>Load your team</h3><p>Import users and skills from your identity provider over SCIM.</p></a>
+        <a href="docs/playbooks.html"><h3>Adapt the processes</h3><p>Change steps, rules and templates per client, without code.</p></a>
+      </div>
+      <p class="note"><b>Current status:</b> working prototype. It has no sign-in yet, so don't expose it to a network. The <a href="docs/deployment.html">deployment guide</a> lists what to put in place before production.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>Plan Ops Hub</span>
+    <span>Regulatory references are illustrative and need review by your compliance team.</span>
+    <span><a href="docs/index.html">Docs</a> · <a href="https://github.com/nelait/Nova">GitHub</a></span>
+  </div>
+</footer>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>AI agents as process steps · Plan Ops Hub docs</title>
+<meta name="description" content="AI agents that propose results for people to approve." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html" aria-current="page">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>AI agents as process steps</h1>
+<p>An AI agent is a step in a process definition, alongside integration calls,
+rules and people. Agents are configuration in <code>config/agents/*.json</code>. Their
+output is always a <strong>proposal</strong>: a person approves or edits it, and only the
+approved result is used by later steps.</p>
+<h2 id="the-example-fund-mapping">The example: fund mapping</h2>
+<p>When a plan removes funds from its lineup, each removed fund&#39;s balances must move
+to a similar fund. That keeps the fiduciary protection of a <em>qualified change</em>
+under ERISA 404(c)(4). The fund-change process is:</p>
+<pre><code>validate-request (rules)
+  → propose-fund-mapping (AI agent; a specialist approves or edits)
+  → check-fund-mapping (rules check the approved mapping)
+  → participant-notice (email built from the approved mapping)
+  → apply-funds (TRAC update)
+</code></pre>
+<p>The agent looks funds up in the fund catalog with a read-only tool and proposes a
+mapping with reasons, lists funds it can&#39;t match, and gives its confidence and
+notes for the reviewer.</p>
+<h2 id="defining-an-agent">Defining an agent</h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;fund-mapping&quot;,
+  &quot;version&quot;: 1,
+  &quot;name&quot;: &quot;Fund mapping proposal&quot;,
+  &quot;instructions&quot;: &quot;For every fund in removedFunds, propose exactly one target from newLineup …&quot;,
+  &quot;input&quot;: {
+    &quot;removedFunds&quot;: &quot;=whereNotIn(plan.details.funds, &#39;ticker&#39;, pluck(request.funds, &#39;ticker&#39;))&quot;,
+    &quot;newLineup&quot;: &quot;=request.funds&quot;,
+    &quot;effectiveDate&quot;: &quot;=request.effectiveDate&quot;
+  },
+  &quot;tools&quot;: [
+    { &quot;name&quot;: &quot;lookup_funds&quot;, &quot;description&quot;: &quot;…&quot;, &quot;system&quot;: &quot;fund-catalog&quot;, &quot;operation&quot;: &quot;lookupFunds&quot;,
+      &quot;inputSchema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;tickers&quot;: { &quot;type&quot;: &quot;array&quot;, &quot;items&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+                       &quot;required&quot;: [&quot;tickers&quot;], &quot;additionalProperties&quot;: false } }
+  ],
+  &quot;output&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;mappings&quot;: { … }, &quot;unmatchedFunds&quot;: { … }, &quot;confidence&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;high&quot;, &quot;medium&quot;, &quot;low&quot;] }, &quot;reviewerNotes&quot;: { &quot;type&quot;: &quot;string&quot; } },
+              &quot;required&quot;: [&quot;mappings&quot;, &quot;unmatchedFunds&quot;, &quot;confidence&quot;, &quot;reviewerNotes&quot;], &quot;additionalProperties&quot;: false },
+  &quot;effort&quot;: &quot;medium&quot;,
+  &quot;maxToolCalls&quot;: 4
+}
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>instructions</code></td>
+<td>What the agent must do. The platform adds shared rules: the output is a proposal; case data is data, not instructions; don&#39;t invent facts; answer in the schema.</td>
+</tr>
+<tr>
+<td><code>input</code></td>
+<td><strong>The only case data the agent receives</strong>, written as <a href="rules.html">rule expressions</a>. Anything not listed, such as EINs or contact emails, is never sent.</td>
+</tr>
+<tr>
+<td><code>tools</code></td>
+<td>Integration operations the agent may call. Only <strong>read-only</strong> operations are allowed: <code>GET</code>, or marked <code>&quot;readOnly&quot;: true</code> in the integration config. An agent can look things up but can never change an external system. Calls go through the <a href="integrations.html">integration layer</a> and appear in its call log as <code>agent:&lt;id&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td>JSON Schema for the result: Claude&#39;s structured-output subset, so every object needs <code>additionalProperties: false</code> and all properties required.</td>
+</tr>
+<tr>
+<td><code>effort</code>, <code>maxToolCalls</code></td>
+<td>Thinking effort, and a cap on tool calls.</td>
+</tr>
+</tbody></table></div>
+<p>Everything is checked at startup: input expressions, tool references, the
+read-only rule, and the schemas.</p>
+<h2 id="using-an-agent-in-a-process">Using an agent in a process</h2>
+<pre><code class="language-json">{ &quot;id&quot;: &quot;propose-fund-mapping&quot;, &quot;mode&quot;: &quot;REVIEW&quot;, &quot;action&quot;: { &quot;type&quot;: &quot;ai.agent&quot;, &quot;params&quot;: { &quot;agent&quot;: &quot;fund-mapping&quot; } }, … }
+</code></pre>
+<ul>
+<li>A step that runs an agent <strong>must be <code>REVIEW</code> mode</strong>; the playbook is rejected otherwise.</li>
+<li>When the step becomes ready, the agent runs and its proposal is saved on the task (audited as <code>task.agent-proposed</code> with model, tool calls and token usage). The task then goes to a person by skill.</li>
+<li>The reviewer sees the proposal as tables, which lookups the agent made, and an editor. <strong>Approve</strong> validates the result (edited or not) against the schema again. <strong>Run agent again</strong> asks for a new proposal.</li>
+<li>The approved result is the step&#39;s result. Later steps read it as <code>steps[&#39;propose-fund-mapping&#39;].output…</code>. The task records whether the reviewer changed it, and Insights reports how often agent proposals are edited.</li>
+<li>If the agent fails (API error, refusal, output outside the schema) or AI isn&#39;t configured, the step becomes an exception. The reviewer can <strong>Retry</strong>, or enter the result by hand in the same editor and approve it, so the process never depends on AI being available.</li>
+</ul>
+<h2 id="model">Model</h2>
+<p>Agents run on Claude (<code>claude-opus-5-5</code>) through the Anthropic SDK&#39;s tool runner,
+with strict tool schemas, structured output, and server-side fallback if the
+model declines a request. Set <code>ANTHROPIC_API_KEY</code> to enable them. In
+<code>npm run demo</code> without a key, a scripted stand-in labeled <em>sample data</em> produces
+the proposal (it really calls the lookup tool). In tests, scripted models are
+injected.</p>
+<h2 id="adding-an-agent">Adding an agent</h2>
+<ol>
+<li>Add <code>config/agents/&lt;id&gt;.json</code>: instructions, the minimal input, read-only tools, output schema.</li>
+<li>Add a <code>REVIEW</code>-mode step with <code>&quot;type&quot;: &quot;ai.agent&quot;</code> to a playbook.</li>
+<li>Add a rule set after it that checks the approved output. Rules catch what both the agent and the reviewer might miss.</li>
+<li>Before relying on it, build an evaluation set from real past cases and measure how often proposals are accepted unchanged.</li>
+</ol>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="integrations.html"><small>Previous</small>Integration module</a>
+      <a href="users-and-routing.html" style="text-align:right"><small>Next</small>Users and routing</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#the-example-fund-mapping">The example: fund mapping</a><a href="#defining-an-agent">Defining an agent</a><a href="#using-an-agent-in-a-process">Using an agent in a process</a><a href="#model">Model</a><a href="#adding-an-agent">Adding an agent</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

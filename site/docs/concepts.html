@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Concepts · Plan Ops Hub docs</title>
+<meta name="description" content="Plans, cases, tasks, the four kinds of step, and how work flows." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html" aria-current="page">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Concepts</h1>
+<p>Plan Ops Hub sits between plan sponsors and the recordkeeper. It turns each
+request into a case and the case into tasks, routes the tasks to people with the
+right skills, automates what is safe to automate, and commits the result to the
+recordkeeper, which stays the system of record.</p>
+<h2 id="plans-cases-and-tasks">Plans, cases and tasks</h2>
+<ul>
+<li><p>A <strong>plan</strong> is one employer&#39;s retirement plan (401(k), 403(b), 457(b)): sponsor, EIN, contacts, fund lineup and fees. Before installation the hub holds its onboarding data; after installation the recordkeeper is the source of truth and the hub refreshes its copy at the start of every new case.</p>
+</li>
+<li><p>A <strong>case</strong> is one business request against one plan. There are five types:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Case type</th>
+<th>Started when</th>
+<th>Ends with</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>INSTALLATION</code></td>
+<td>A new sponsor onboards</td>
+<td>The plan is created on the recordkeeper (&quot;installation complete&quot;)</td>
+</tr>
+<tr>
+<td><code>MAINTENANCE_CONTACT</code></td>
+<td>A plan contact changes</td>
+<td>Contact updated on the recordkeeper</td>
+</tr>
+<tr>
+<td><code>MAINTENANCE_FUNDS</code></td>
+<td>The fund lineup changes</td>
+<td>New lineup on the recordkeeper, participants notified</td>
+</tr>
+<tr>
+<td><code>MAINTENANCE_FEES</code></td>
+<td>The fee schedule changes</td>
+<td>New fees on the recordkeeper, disclosure sent</td>
+</tr>
+<tr>
+<td><code>TERMINATION</code></td>
+<td>The sponsor leaves or deconverts</td>
+<td>Plan terminated on the recordkeeper</td>
+</tr>
+</tbody></table></div>
+</li>
+<li><p>A <strong>task</strong> is one step of a case. Tasks wait (<code>BLOCKED</code>) until the steps they depend on are done, then become <code>READY</code>, are worked, and end <code>DONE</code> or <code>SKIPPED</code>.</p>
+</li>
+</ul>
+<h2 id="channels">Channels</h2>
+<p>Requests arrive by <strong>digital</strong> submission, <strong>manual</strong> entry by staff, or <strong>paper</strong>
+(scanned text). Every channel becomes the same structured request, so nothing
+after intake depends on how a request arrived.</p>
+<h2 id="process-definitions-playbooks">Process definitions (playbooks)</h2>
+<p>Each case type follows a versioned <strong>playbook</strong> in <code>config/playbooks/</code>. A playbook
+is a list of steps with dependencies. Every case records the playbook version it
+ran under, so you can always tell which process applied. See
+<a href="playbooks.html">Process definitions</a>.</p>
+<h2 id="four-kinds-of-step">Four kinds of step</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Step type</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Integration</strong></td>
+<td><code>integration.call</code>, plus built-in recordkeeper actions</td>
+<td>Reads from or writes to an external system. See <a href="integrations.html">Integrations</a>.</td>
+</tr>
+<tr>
+<td><strong>Rules</strong></td>
+<td><code>rules.evaluate</code></td>
+<td>Validations, calculations and decision tables, written as configuration. See <a href="rules.html">Rules</a>.</td>
+</tr>
+<tr>
+<td><strong>AI agent</strong></td>
+<td><code>ai.agent</code></td>
+<td>Claude proposes a result; a person approves or edits it. See <a href="agents.html">AI agents</a>.</td>
+</tr>
+<tr>
+<td><strong>Person</strong></td>
+<td>any step in <code>REVIEW</code> or <code>MANUAL</code> mode</td>
+<td>Checklists, call-backs, approvals, emails prepared for review.</td>
+</tr>
+</tbody></table></div>
+<p>Steps pass data forward: any later step, rule or condition can read an earlier
+result as <code>steps[&#39;&lt;step-id&gt;&#39;]</code>.</p>
+<h2 id="automation-modes">Automation modes</h2>
+<p>Each step has a mode, and clients can override it:</p>
+<ul>
+<li><strong>AUTO</strong>: runs by itself. If it fails, it becomes an <em>exception</em> and goes to a person rather than stalling the case.</li>
+<li><strong>REVIEW</strong>: the system prepares the work (an email draft, a calculation, a recordkeeper update, an AI proposal) and a person approves it.</li>
+<li><strong>MANUAL</strong>: a person does the work outside the system and confirms it against a checklist.</li>
+</ul>
+<h2 id="exceptions">Exceptions</h2>
+<p>When an automatic step fails (bad data, a system outage, a failed rule), the task
+goes to a person with the reason. They can fix the data and <strong>Retry</strong>, or
+<strong>Override</strong> with a written justification. Both are audited.</p>
+<h2 id="routing">Routing</h2>
+<p>Each step names a skill and an optional minimum level. Work goes to an eligible
+person with the most spare capacity; ties rotate so work is shared evenly. If no
+eligible person is free, the task waits in a queue. See
+<a href="users-and-routing.html">Users and routing</a>.</p>
+<h2 id="guided-actions">Guided actions</h2>
+<p>Every task shows its guidance, checklist, regulatory reference, alerts, and the
+prepared work. With Claude enabled, <strong>Ask Claude</strong> adds a case-specific briefing,
+risks found in the data, and a rewritten email draft. That help is advisory: it
+cannot change which steps run or who receives an email.</p>
+<h2 id="safeguards-built-in">Safeguards built in</h2>
+<ul>
+<li>Every outgoing email must keep the facts its template inserted (amounts, dates, names, tickers), whoever edited it.</li>
+<li>Writes to external systems carry an idempotency key, so a retried step never applies twice.</li>
+<li>Every action is in the audit trail, with who did it and why.</li>
+</ul>
+<h2 id="insights">Insights</h2>
+<p>Insights measure each step: handle time, failures, overrides, how often drafts are
+edited, and SLA breaches. They suggest improvements, such as making a step
+automatic or fixing a template, for a process owner to decide on.</p>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="getting-started.html"><small>Previous</small>Getting started</a>
+      <a href="playbooks.html" style="text-align:right"><small>Next</small>Process definitions</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#plans-cases-and-tasks">Plans, cases and tasks</a><a href="#channels">Channels</a><a href="#process-definitions-playbooks">Process definitions (playbooks)</a><a href="#four-kinds-of-step">Four kinds of step</a><a href="#automation-modes">Automation modes</a><a href="#exceptions">Exceptions</a><a href="#routing">Routing</a><a href="#guided-actions">Guided actions</a><a href="#safeguards-built-in">Safeguards built in</a><a href="#insights">Insights</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

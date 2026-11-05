@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Deployment · Plan Ops Hub docs</title>
+<meta name="description" content="Settings, and what to put in place before production." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html" aria-current="page">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Deployment</h1>
+<p>Plan Ops Hub is a working prototype. It runs the full process end to end, but some
+parts a production deployment needs are not built yet. This page lists the
+settings, then what to put in place before real plan data goes through it.</p>
+<h2 id="configuration">Configuration</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>PORT</code></td>
+<td><code>3000</code></td>
+<td>HTTP port</td>
+</tr>
+<tr>
+<td><code>DB_PATH</code></td>
+<td><code>data/planops.db</code></td>
+<td>SQLite database file</td>
+</tr>
+<tr>
+<td><code>TRAC_BASE_URL</code></td>
+<td><code>mock://trac</code></td>
+<td>Recordkeeper API; unset uses the built-in mock</td>
+</tr>
+<tr>
+<td><code>TRAC_API_KEY</code></td>
+<td>none</td>
+<td>Recordkeeper API key (required when the URL is real)</td>
+</tr>
+<tr>
+<td><code>FUND_CATALOG_URL</code></td>
+<td><code>mock://fund-catalog</code></td>
+<td>Fund catalog API; unset uses the built-in mock</td>
+</tr>
+<tr>
+<td><code>ANTHROPIC_API_KEY</code></td>
+<td>none</td>
+<td>Enables Ask Claude and AI agent steps</td>
+</tr>
+<tr>
+<td><code>AI_ASSIST</code></td>
+<td>on</td>
+<td>Set <code>off</code> to disable Claude even when a key is present</td>
+</tr>
+</tbody></table></div>
+<p>Process definitions, rules, integrations, agents, templates and client variations
+are files under <code>config/</code>. Keep them in version control and review changes like
+code: they are your operating procedures.</p>
+<pre><code class="language-bash">npm install
+npm test            # 65 tests, including every rule set&#39;s own test cases
+npm start
+</code></pre>
+<h2 id="before-production">Before production</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Today</th>
+<th>Needed</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Sign-in</strong></td>
+<td>No login. The acting user comes from an <code>x-user-id</code> header, so any caller can act as anyone.</td>
+<td>Single sign-on (OIDC/SAML) and authorization by role and skill on every API route. <strong>Do not expose the prototype to a network.</strong></td>
+</tr>
+<tr>
+<td><strong>Demo endpoints</strong></td>
+<td><code>POST /api/trac/simulate-outage</code> is exposed.</td>
+<td>Remove it, or restrict it to test environments.</td>
+</tr>
+<tr>
+<td><strong>Database</strong></td>
+<td>SQLite with JSON documents.</td>
+<td>Postgres with real tables (services use only the storage interface), backups and retention rules.</td>
+</tr>
+<tr>
+<td><strong>External calls</strong></td>
+<td>Run inline when a step becomes ready, with a lock per case.</td>
+<td>A durable job queue so slow systems don&#39;t hold requests open and work survives restarts; reconciliation with the recordkeeper.</td>
+</tr>
+<tr>
+<td><strong>Email</strong></td>
+<td>Written to an outbox table.</td>
+<td>A mail service, plus PDF generation for participant notices.</td>
+</tr>
+<tr>
+<td><strong>Paper intake</strong></td>
+<td>A simple text parser.</td>
+<td>An OCR/IDP service with confidence scores and review of low-confidence fields.</td>
+</tr>
+<tr>
+<td><strong>Regulatory content</strong></td>
+<td>References and the fee model are illustrative.</td>
+<td>Review by your compliance team and replacement with contract terms.</td>
+</tr>
+</tbody></table></div>
+<h2 id="data-and-ai">Data and AI</h2>
+<ul>
+<li>Claude is optional. With it on, the case data a feature needs is sent to the Anthropic API: for Ask Claude, the task&#39;s plan details (including contact names and emails), request and earlier step results; for AI agents, only the fields the agent&#39;s input mapping lists. Check this against your data-handling policy.</li>
+<li>Integration call logs record method, path, status and timing, never request or response bodies or secrets.</li>
+<li>Secrets come only from environment variables and are never shown in the UI.</li>
+</ul>
+<h2 id="upgrading-process-definitions">Upgrading process definitions</h2>
+<ol>
+<li>Change the playbook, rule set or agent and increase its <code>version</code>.</li>
+<li>Add or update the rule set&#39;s test cases, then run <code>npm test</code>.</li>
+<li>Deploy. New cases use the new version; open cases record the version they started under.</li>
+</ol>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="users-and-routing.html"><small>Previous</small>Users and routing</a>
+      <a href="api.html" style="text-align:right"><small>Next</small>API reference</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#configuration">Configuration</a><a href="#before-production">Before production</a><a href="#data-and-ai">Data and AI</a><a href="#upgrading-process-definitions">Upgrading process definitions</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+/* Plan Ops Hub design tokens, shared by the app, the product site and the docs.
+   Themes: system (no data-theme), light, dark, contrast (high contrast).
+   Layout concept: a working ledger. Calm surfaces, one deep-green action color,
+   brass reserved for human-approval moments, semantic color only for status. */
+:root {
+  --bg: #f2f5f3;
+  --surface: #ffffff;
+  --surface-2: #e8eeeb;
+  --ink: #12201b;
+  --muted: #55655e;
+  --line: #d3ddd8;
+  --accent: #1d5c4f;
+  --accent-ink: #ffffff;
+  --accent-soft: #d9ebe5;
+  --brass: #9c6a16;
+  --brass-soft: #f5e8cf;
+  --ok: #1d7444;
+  --warn: #965700;
+  --bad: #b3261e;
+  --info: #2a5aa3;
+  --shadow: 0 1px 2px rgb(18 32 27 / 6%), 0 4px 16px rgb(18 32 27 / 5%);
+  --focus: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+
+  --font-display: 'Familjen Grotesk', 'Helvetica Neue', Arial, sans-serif;
+  --font-body: 'Atkinson Hyperlegible', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='contrast']) {
+    --bg: #0d1412; --surface: #141d1a; --surface-2: #1b2622; --ink: #e3ebe7; --muted: #94a59d; --line: #2a3832;
+    --accent: #6cc0ab; --accent-ink: #0a1411; --accent-soft: #1b3832; --brass: #d8a444; --brass-soft: #3a2e17;
+    --ok: #5cc48a; --warn: #e6a646; --bad: #f2756b; --info: #8db6f7;
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 6px 20px rgb(0 0 0 / 25%);
+    color-scheme: dark;
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #0d1412; --surface: #141d1a; --surface-2: #1b2622; --ink: #e3ebe7; --muted: #94a59d; --line: #2a3832;
+  --accent: #6cc0ab; --accent-ink: #0a1411; --accent-soft: #1b3832; --brass: #d8a444; --brass-soft: #3a2e17;
+  --ok: #5cc48a; --warn: #e6a646; --bad: #f2756b; --info: #8db6f7;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 6px 20px rgb(0 0 0 / 25%);
+  color-scheme: dark;
+}
+/* High contrast: pure ground, strong lines, no tints that rely on subtle color. */
+:root[data-theme='contrast'] {
+  --bg: #ffffff; --surface: #ffffff; --surface-2: #f0f0f0; --ink: #000000; --muted: #2b2b2b; --line: #000000;
+  --accent: #003d32; --accent-ink: #ffffff; --accent-soft: #ffffff; --brass: #5c3b00; --brass-soft: #ffffff;
+  --ok: #00512a; --warn: #5c3300; --bad: #8f0000; --info: #002f80;
+  --shadow: none;
+  --focus: 0 0 0 3px #000000;
+  color-scheme: light;
+}

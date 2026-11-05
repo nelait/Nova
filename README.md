@@ -29,6 +29,14 @@ see only the case data they're given, can only use read-only lookups, and return
 schema-checked proposal that a person approves or edits before anything uses it.
 See [docs/AGENTS.md](docs/AGENTS.md).
 
+The app has four themes (Auto, Light, Dark and High contrast), chosen in the
+sidebar and remembered per browser.
+
+**Product site and documentation:** `site/` holds a static product page and a
+docs site built from the guides in `docs/` (`npm run site:build`; the build fails
+on any broken internal link). A running instance also serves it at `/site/`.
+Start with [Getting started](docs/getting-started.md).
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## Screenshots
@@ -127,7 +135,9 @@ src/
   rules/       rule engine: expression language, rule sets, tests
   integrations/ integration registry and HTTP client; mock TRAC and fund catalog
   api/         HTTP API
-public/        single-page UI (no build step)
+public/        single-page UI (no build step) and shared theme tokens (theme.css)
+site-src/      product page and site styles; scripts/build-site.ts builds site/
+site/          built product site and docs (static, host anywhere)
 scripts/       demo data and demo server
 test/          end-to-end tests
 ```

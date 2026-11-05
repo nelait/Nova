@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>API reference · Plan Ops Hub docs</title>
+<meta name="description" content="Every HTTP endpoint, with request shapes." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html" aria-current="page">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>API reference</h1>
+<p>JSON over HTTP. Send <code>content-type: application/json</code>. The acting user is the
+<code>x-user-id</code> header; in production this must come from a signed-in session (see
+<a href="deployment.html">Deployment</a>). Errors return <code>{ &quot;error&quot;: &quot;...&quot;, &quot;issues&quot;: [...] }</code>
+with status 404 (not found), 422 (validation), 502 (external system), 503 (AI
+unavailable) or 500.</p>
+<h2 id="requests-and-cases">Requests and cases</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Body / notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>POST</td>
+<td><code>/api/intake</code></td>
+<td>Start a case. <code>{ caseType, channel, clientId?, planId?, data?, documentText? }</code>. <code>channel</code> is <code>DIGITAL</code>, <code>MANUAL</code> or <code>PAPER</code>; paper takes <code>documentText</code>. Maintenance and termination need <code>planId</code>.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/cases</code></td>
+<td>All cases with progress</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/cases/:id</code></td>
+<td>A case with its plan, tasks and audit trail</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/cases/:id/cancel</code></td>
+<td><code>{ reason }</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/plans</code>, <code>/api/plans/:id</code></td>
+<td>Plans</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/api/plans/:id</code></td>
+<td>Correct onboarding data. Only before the plan is on the recordkeeper.</td>
+</tr>
+</tbody></table></div>
+<p>Example: start an installation.</p>
+<pre><code class="language-http">POST /api/intake
+{ &quot;caseType&quot;: &quot;INSTALLATION&quot;, &quot;channel&quot;: &quot;DIGITAL&quot;, &quot;clientId&quot;: &quot;default&quot;,
+  &quot;data&quot;: { &quot;details&quot;: { &quot;sponsorName&quot;: &quot;Northwind Analytics Inc.&quot;, &quot;ein&quot;: &quot;45-1234567&quot;, &quot;employeeCount&quot;: 320,
+    &quot;planType&quot;: &quot;401K&quot;, &quot;effectiveDate&quot;: &quot;2027-01-01&quot;,
+    &quot;contacts&quot;: [{ &quot;role&quot;: &quot;PLAN_ADMINISTRATOR&quot;, &quot;name&quot;: &quot;Jane Doe&quot;, &quot;email&quot;: &quot;jane@northwind.example&quot; }],
+    &quot;funds&quot;: [{ &quot;ticker&quot;: &quot;FXAIX&quot;, &quot;name&quot;: &quot;Fidelity 500 Index&quot; }, { &quot;ticker&quot;: &quot;FDEWX&quot;, &quot;name&quot;: &quot;Fidelity Freedom 2055&quot;, &quot;qdia&quot;: true }],
+    &quot;fees&quot;: { &quot;recordkeepingBps&quot;: 8, &quot;perParticipantUsd&quot;: 40, &quot;terminationBaseUsd&quot;: 2500 } } } }
+</code></pre>
+<h2 id="work">Work</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Body / notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GET</td>
+<td><code>/api/inbox/:userId</code></td>
+<td>Open tasks for a user, most urgent first</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/queue/unassigned</code></td>
+<td>Ready tasks nobody is eligible for</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/tasks/:id/guidance</code></td>
+<td>Guidance, checklist, alerts and the prepared work</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/tasks/:id/start</code></td>
+<td>Start working a task</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/tasks/:id/complete</code></td>
+<td>Approve, confirm, retry or override. <code>{ notes?, edits?, override?, draftSource? }</code>. <code>edits</code> is <code>{ subject, body }</code> for emails or <code>{ output }</code> for AI agent steps.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/tasks/:id/reassign</code></td>
+<td><code>{ toUserId? }</code>. Omit to route again.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/tasks/:id/agent/run</code></td>
+<td>Ask the AI agent for a new proposal</td>
+</tr>
+<tr>
+<td>GET / POST</td>
+<td><code>/api/tasks/:id/ai-assist</code></td>
+<td>Stored Claude assist / ask Claude (<code>{ refresh? }</code>)</td>
+</tr>
+</tbody></table></div>
+<h2 id="configuration-read-only">Configuration (read-only)</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GET</td>
+<td><code>/api/playbooks</code>, <code>/api/clients</code></td>
+<td>Process definitions and client variations</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/rules</code>, <code>/api/rules/:id</code>, <code>/api/rules/functions</code></td>
+<td>Rule sets and the expression functions</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/rules/:id/test</code></td>
+<td>Run a rule set&#39;s test cases</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/rules/:id/evaluate</code></td>
+<td><code>{ caseId }</code> or <code>{ context }</code>. Read-only.</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/integrations</code>, <code>/api/integrations/calls</code></td>
+<td>Systems (secret status, never values) and the call log</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/integrations/:id/test</code></td>
+<td>Run a system&#39;s health check</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/agents</code>, <code>/api/ai/status</code></td>
+<td>AI agents, and whether Claude is enabled</td>
+</tr>
+</tbody></table></div>
+<h2 id="team">Team</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GET</td>
+<td><code>/api/users</code></td>
+<td>Users with skills and open-task counts</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/users/import/scim</code></td>
+<td>SCIM 2.0 import. See <a href="users-and-routing.html">Users and routing</a>.</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/users/import</code></td>
+<td>Plain JSON import</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/users/:id/active</code></td>
+<td><code>{ active }</code></td>
+</tr>
+</tbody></table></div>
+<h2 id="monitoring">Monitoring</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GET</td>
+<td><code>/api/insights</code></td>
+<td>Step metrics and suggestions</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/audit?limit=200</code></td>
+<td>Most recent audit events</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/outbox</code></td>
+<td>Sent emails</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/trac/plans</code></td>
+<td>Recordkeeper plans, read through the integration</td>
+</tr>
+</tbody></table></div>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="deployment.html"><small>Previous</small>Deployment</a>
+      <a href="architecture.html" style="text-align:right"><small>Next</small>Architecture</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#requests-and-cases">Requests and cases</a><a href="#work">Work</a><a href="#configuration-read-only">Configuration (read-only)</a><a href="#team">Team</a><a href="#monitoring">Monitoring</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

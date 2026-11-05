@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Process definitions · Plan Ops Hub docs</title>
+<meta name="description" content="Steps, actions, conditions, templates and per-client variations." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html" aria-current="page">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Process definitions</h1>
+<p>Each case type follows a playbook in <code>config/playbooks/</code>. A playbook is versioned
+JSON: a list of steps, the dependencies between them, and how each is carried
+out. Playbooks are checked when the system starts, and a broken one stops
+startup with a message that names the step.</p>
+<h2 id="a-playbook">A playbook</h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;maintenance-funds&quot;,
+  &quot;version&quot;: 2,
+  &quot;caseType&quot;: &quot;MAINTENANCE_FUNDS&quot;,
+  &quot;name&quot;: &quot;Change fund lineup&quot;,
+  &quot;description&quot;: &quot;Add, remove or map investment options in the plan&#39;s lineup.&quot;,
+  &quot;steps&quot;: [
+    { &quot;id&quot;: &quot;validate-request&quot;, &quot;name&quot;: &quot;Validate fund change request&quot;, &quot;skill&quot;: &quot;MAINTENANCE&quot;, &quot;mode&quot;: &quot;AUTO&quot;,
+      &quot;action&quot;: { &quot;type&quot;: &quot;rules.evaluate&quot;, &quot;params&quot;: { &quot;ruleSet&quot;: &quot;fund-change&quot; } }, &quot;slaHours&quot;: 4,
+      &quot;guidance&quot;: &quot;The new lineup must be complete, keep exactly one QDIA, and give an effective date.&quot; },
+    { &quot;id&quot;: &quot;propose-fund-mapping&quot;, &quot;name&quot;: &quot;Review AI-proposed fund mapping&quot;, &quot;skill&quot;: &quot;INVESTMENTS&quot;, &quot;mode&quot;: &quot;REVIEW&quot;,
+      &quot;action&quot;: { &quot;type&quot;: &quot;ai.agent&quot;, &quot;params&quot;: { &quot;agent&quot;: &quot;fund-mapping&quot; } },
+      &quot;dependsOn&quot;: [&quot;validate-request&quot;], &quot;slaHours&quot;: 48, &quot;guidance&quot;: &quot;…&quot; }
+  ]
+}
+</code></pre>
+<p>Increase <code>version</code> whenever you change a playbook. Each case records the version it
+started under.</p>
+<h2 id="step-fields">Step fields</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>id</code></td>
+<td>yes</td>
+<td>Unique within the playbook. Later steps refer to its result as <code>steps[&#39;&lt;id&gt;&#39;]</code>.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>yes</td>
+<td>What people see in their inbox.</td>
+</tr>
+<tr>
+<td><code>skill</code></td>
+<td>yes</td>
+<td>Skill needed to work the step, e.g. <code>COMPLIANCE</code>.</td>
+</tr>
+<tr>
+<td><code>minSkillLevel</code></td>
+<td>no</td>
+<td>Minimum level (1 to 3) to be eligible. Default 1.</td>
+</tr>
+<tr>
+<td><code>mode</code></td>
+<td>yes</td>
+<td><code>AUTO</code>, <code>REVIEW</code> or <code>MANUAL</code>. See <a href="concepts.html#automation-modes">Concepts</a>.</td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td>yes</td>
+<td>What the step does (table below).</td>
+</tr>
+<tr>
+<td><code>dependsOn</code></td>
+<td>no</td>
+<td>Step ids that must be done or skipped first.</td>
+</tr>
+<tr>
+<td><code>when</code></td>
+<td>no</td>
+<td>Condition (<a href="rules.html">rules language</a>). False means the step is skipped and audited.</td>
+</tr>
+<tr>
+<td><code>slaHours</code></td>
+<td>no</td>
+<td>Due time, counted from when the step becomes ready.</td>
+</tr>
+<tr>
+<td><code>guidance</code></td>
+<td>yes</td>
+<td>Shown to the person working the step, and given to Claude.</td>
+</tr>
+<tr>
+<td><code>checklist</code></td>
+<td>no</td>
+<td>Items the person must tick before approving.</td>
+</tr>
+<tr>
+<td><code>regulatoryRef</code></td>
+<td>no</td>
+<td>Regulation or policy the step satisfies.</td>
+</tr>
+</tbody></table></div>
+<h2 id="actions">Actions</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th><code>action.type</code></th>
+<th>Params</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>rules.evaluate</code></td>
+<td><code>ruleSet</code></td>
+<td>Runs a <a href="rules.html">rule set</a>. Error-level failures stop the step.</td>
+</tr>
+<tr>
+<td><code>integration.call</code></td>
+<td><code>system</code>, <code>operation</code>, <code>input</code></td>
+<td>Calls a configured <a href="integrations.html">integration</a> and stores its data.</td>
+</tr>
+<tr>
+<td><code>ai.agent</code></td>
+<td><code>agent</code></td>
+<td>Runs an <a href="agents.html">AI agent</a>. The step must be <code>REVIEW</code> mode.</td>
+</tr>
+<tr>
+<td><code>email.send</code></td>
+<td><code>template</code>, <code>to</code>, <code>cc</code>, <code>ccPrevious</code>, <code>useRequestFees</code></td>
+<td>Drafts an email from <code>config/templates/</code> to plan contacts by role (<code>PLAN_ADMINISTRATOR</code>, <code>PAYROLL</code>, <code>TRUSTEE</code>, <code>HR</code>).</td>
+</tr>
+<tr>
+<td><code>contacts.upsert</code></td>
+<td><code>source</code>: <code>plan</code> or <code>request</code></td>
+<td>Creates plan contacts, or applies a requested contact change on the recordkeeper.</td>
+</tr>
+<tr>
+<td><code>funds.apply</code></td>
+<td><code>source</code>: <code>plan</code> or <code>request</code></td>
+<td>Approves the lineup, or applies a new lineup on the recordkeeper.</td>
+</tr>
+<tr>
+<td><code>fees.apply</code></td>
+<td>none</td>
+<td>Applies the requested fee schedule on the recordkeeper.</td>
+</tr>
+<tr>
+<td><code>trac.installPlan</code></td>
+<td>none</td>
+<td>Creates the plan on the recordkeeper.</td>
+</tr>
+<tr>
+<td><code>trac.terminatePlan</code></td>
+<td>none</td>
+<td>Terminates the plan on the recordkeeper.</td>
+</tr>
+<tr>
+<td><code>none</code></td>
+<td>none</td>
+<td>A person does the work and confirms it.</td>
+</tr>
+</tbody></table></div>
+<h2 id="conditional-steps">Conditional steps</h2>
+<pre><code class="language-json">{ &quot;id&quot;: &quot;enrollment-meetings&quot;, &quot;dependsOn&quot;: [&quot;welcome-email&quot;],
+  &quot;when&quot;: &quot;steps[&#39;validate-intake&#39;].decisions.segment.enrollmentMeetings == true&quot;, … }
+</code></pre>
+<p>The condition is evaluated once the dependencies are done. A skipped step counts
+as done for the steps after it. If the condition can&#39;t be evaluated, the step goes
+to a person instead of being skipped silently.</p>
+<h2 id="email-templates">Email templates</h2>
+<p>Templates live in <code>config/templates/&lt;name&gt;.txt</code>. The first line is the subject,
+and <code>{{path}}</code> inserts values such as <code>{{plan.details.sponsorName}}</code> or
+<code>{{steps.calculate-fees.outputs.totalUsd}}</code>. Every value a template inserts becomes
+a required fact: an edited email, whether edited by a person or by Claude, can&#39;t be
+sent without it.</p>
+<h2 id="per-client-variations">Per-client variations</h2>
+<p>Clients can follow a variant of the standard process without code changes.
+Create <code>config/clients/&lt;clientId&gt;.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;clientId&quot;: &quot;acme-premium&quot;,
+  &quot;displayName&quot;: &quot;Premium service model&quot;,
+  &quot;playbookOverrides&quot;: {
+    &quot;INSTALLATION&quot;: {
+      &quot;modeOverrides&quot;: { &quot;welcome-email&quot;: &quot;AUTO&quot; },
+      &quot;disableSteps&quot;: [],
+      &quot;addSteps&quot;: [{ &quot;id&quot;: &quot;kickoff-call&quot;, &quot;name&quot;: &quot;Hold kickoff call with sponsor&quot;, &quot;skill&quot;: &quot;PLAN_SETUP&quot;, &quot;mode&quot;: &quot;MANUAL&quot;,
+                     &quot;action&quot;: { &quot;type&quot;: &quot;none&quot; }, &quot;dependsOn&quot;: [&quot;welcome-email&quot;], &quot;guidance&quot;: &quot;…&quot; }]
+    }
+  },
+  &quot;templateOverrides&quot;: { &quot;welcome&quot;: &quot;welcome-acme&quot; },
+  &quot;ruleSetOverrides&quot;: { &quot;termination-fees&quot;: &quot;termination-fees-premium&quot; }
+}
+</code></pre>
+<p>Every client&#39;s variant is checked at startup too. One policy check runs in the
+test suite: every <code>COMPLIANCE</code> step, in every client variant, must require level 2+.</p>
+<h2 id="checks-at-startup">Checks at startup</h2>
+<ul>
+<li>Step ids are unique, dependencies exist, and there are no cycles.</li>
+<li>Conditions and step inputs compile.</li>
+<li>Referenced rule sets, integration operations and agents exist.</li>
+<li>AI agent steps are in <code>REVIEW</code> mode.</li>
+</ul>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="concepts.html"><small>Previous</small>Concepts</a>
+      <a href="rules.html" style="text-align:right"><small>Next</small>Rules module</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#a-playbook">A playbook</a><a href="#step-fields">Step fields</a><a href="#actions">Actions</a><a href="#conditional-steps">Conditional steps</a><a href="#email-templates">Email templates</a><a href="#per-client-variations">Per-client variations</a><a href="#checks-at-startup">Checks at startup</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

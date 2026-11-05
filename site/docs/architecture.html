@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Architecture · Plan Ops Hub docs</title>
+<meta name="description" content="Components, design decisions and the task state machine." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html" aria-current="page">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Architecture</h1>
+<h2 id="purpose">Purpose</h2>
+<p>Plan Ops Hub sits between a plan sponsor (the employer) and the recordkeeper
+(TRAC). It turns each business request into a set of tasks and routes them to
+people with the right skills. For each task it gives guidance and pre-built work
+product, automates what is safe to automate, and commits the final result to the
+recordkeeper. <strong>After go-live the recordkeeper is the system of record.</strong> The hub
+keeps only a working snapshot of the plan.</p>
+<h2 id="lifecycle-case-types">Lifecycle → case types</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Lifecycle stage</th>
+<th>Case type</th>
+<th>Playbook</th>
+<th>Ends with</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Onboarding / plan setup</td>
+<td><code>INSTALLATION</code></td>
+<td><code>config/playbooks/installation.json</code></td>
+<td><code>trac.installPlan</code>, then plan becomes <code>ACTIVE</code> (&quot;Installation Complete&quot;)</td>
+</tr>
+<tr>
+<td>Ongoing maintenance</td>
+<td><code>MAINTENANCE_CONTACT</code>, <code>MAINTENANCE_FUNDS</code>, <code>MAINTENANCE_FEES</code></td>
+<td><code>maintenance-*.json</code></td>
+<td>Update on TRAC</td>
+</tr>
+<tr>
+<td>Termination / deconversion</td>
+<td><code>TERMINATION</code></td>
+<td><code>termination.json</code></td>
+<td><code>trac.terminatePlan</code>, then plan becomes <code>TERMINATED</code></td>
+</tr>
+</tbody></table></div>
+<p>New request types are added with a new playbook JSON file plus a <code>CaseType</code> value. No engine changes are needed.</p>
+<h2 id="components">Components</h2>
+<pre><code> Paper (OCR text) ─┐
+ Digital portal  ──┼─► [1] Intake ──► [2] Case &amp; Work Item Engine ◄──── [5] Knowledge Base
+ Manual entry    ──┘   normalize        case → tasks (DAG)                playbooks, templates,
+                                         AUTO runs, others routed          client overrides
+                                               │
+   IdP (SCIM) ─► [3] User Directory ─► [4] Skill Router ─► user inbox
+                    users, skills,          skill+level, capacity,
+                    capacity                load balancing, queue
+                                               │
+                                     [6] Guided Actions ── user reviews / edits / approves
+                                         guidance, checklist, regulatory ref,
+                                         drafted email / payload / calculation, alerts
+                                               │
+                                     [7] Action Executor ──► Email gateway
+                                         prepare() = no side effects ──► TRAC adapter (idempotent)
+                                         execute() = side effects
+                                               │
+                                     [8] Audit trail ──► [9] Insights (review &amp; learn)
+                                                            suggestions to process owners
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Component</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Intake: all channels normalized to one shape</td>
+<td><code>src/intake/intake.ts</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Case &amp; work-item engine: task DAG, state machine, SLA, completion</td>
+<td><code>src/cases/caseService.ts</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>User directory: import/sync from the IdP, skills as <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code> groups</td>
+<td><code>src/users/userDirectory.ts</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>Skill router</td>
+<td><code>src/routing/skillRouter.ts</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Knowledge base: playbooks, templates, per-client overrides</td>
+<td><code>src/knowledge/knowledgeBase.ts</code>, <code>config/</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td>Guided actions</td>
+<td><code>src/guidance/guidedActions.ts</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td>Action executor / integration hub</td>
+<td><code>src/actions/executor.ts</code>, <code>src/integrations/*</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td>Audit</td>
+<td><code>audit</code> table, written by <code>CaseService.save</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td>Insights / learning loop</td>
+<td><code>src/learning/insights.ts</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td>Claude assistance (optional)</td>
+<td><code>src/ai/claudeAssist.ts</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td>Rules engine: decision tables, calculations, validations</td>
+<td><code>src/rules/</code>, <code>config/rules/</code> (<a href="rules.html">RULES.md</a>)</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Integration module: configured external systems</td>
+<td><code>src/integrations/</code>, <code>config/integrations/</code> (<a href="integrations.html">INTEGRATIONS.md</a>)</td>
+</tr>
+<tr>
+<td>13</td>
+<td>AI agent steps</td>
+<td><code>src/ai/agents.ts</code>, <code>config/agents/</code> (<a href="agents.html">AGENTS.md</a>)</td>
+</tr>
+</tbody></table></div>
+<h2 id="key-design-decisions">Key design decisions</h2>
+<ol>
+<li><p><strong>Playbooks are deterministic and versioned. The guidance layer is advisory.</strong>
+Which steps happen, especially regulatory ones, comes from a versioned playbook
+and is recorded on the case (<code>playbookId@version</code>). The guidance layer, including
+any future LLM enricher (<code>GuidanceEnricher</code>), may explain, pre-fill, draft or
+flag, but it can&#39;t add, drop or reorder steps. This keeps every case auditable.</p>
+</li>
+<li><p><strong>Automation level is set per step (<code>AUTO</code> / <code>REVIEW</code> / <code>MANUAL</code>), not per workflow.</strong>
+It can be overridden per client. A failed <code>AUTO</code> step doesn&#39;t stall the case: it
+becomes an <em>exception</em> and is routed to a person, who can fix the data and
+retry, or override with a written justification. Both outcomes are audited.</p>
+</li>
+<li><p><strong><code>prepare()</code> vs <code>execute()</code>.</strong> Every action can describe what it <em>will</em> do
+(the drafted email, the TRAC payload, the fee calculation) without side effects.
+That powers both guided actions and human review. <code>execute()</code> performs the side
+effects through configured integrations (<code>IntegrationClient</code>) and the <code>EmailGateway</code>.</p>
+</li>
+<li><p><strong>The recordkeeper is the source of truth after go-live.</strong></p>
+<ul>
+<li>A maintenance or termination case first refreshes the hub&#39;s plan snapshot from TRAC.</li>
+<li>Onboarding data can be corrected in the hub only before the plan is installed. After that, changes need a maintenance case.</li>
+<li>Every TRAC write carries an idempotency key (<code>caseId:stepId</code>), so retries after timeouts never double-post. Emails are idempotent per task in the same way.</li>
+</ul>
+</li>
+<li><p><strong>Generic core, client customization via config.</strong> <code>config/clients/&lt;id&gt;.json</code>
+can disable steps, change a step&#39;s mode, add client-specific steps, and swap
+templates (see <code>acme-premium.json</code>). Playbooks are validated (unknown
+dependencies and cycles are rejected) after overrides are applied.</p>
+</li>
+<li><p><strong>Learning suggests; people decide.</strong> Insights measure each step (handle time,
+auto-failure rate, overrides, how often drafts are edited, SLA breaches, backlog
+by skill) and produce suggestions, for example &quot;drafts approved unchanged 5/5,
+consider AUTO&quot; or &quot;60% of drafts edited, fix the template&quot;. Playbooks are never
+changed automatically.</p>
+</li>
+<li><p><strong>Claude assists; it doesn&#39;t decide.</strong> On request, Claude (<code>claude-opus-5-5</code>,
+structured outputs, effort <code>medium</code>, server-side refusal fallback) receives the
+step&#39;s guidance, checklist and regulatory reference, the case data, earlier
+step results and the prepared work. It returns a briefing, risks, extra
+checks and, for email steps, a rewritten draft. The guardrails are in code, not
+in the prompt:</p>
+<ul>
+<li><strong>Required facts.</strong> The executor derives the facts a template inserts
+(amounts, dates, names, tickers) and blocks any outgoing email that drops
+one, whether the draft came from the template, from Claude or from a person.
+A Claude draft with a missing fact is flagged in the UI before anyone tries.</li>
+<li>Recipients come from plan contacts, never from the model. A non-email step
+never gets a draft, even if the model returns one.</li>
+<li>Sponsor-supplied data goes in delimited data blocks, and the system prompt
+says to treat it as data and to report embedded instructions as a risk.</li>
+<li>Results are cached per task, keyed by a hash of the prompt, so unchanged
+tasks don&#39;t pay twice. Each call is audited with model, served-by model and
+token usage.</li>
+<li>The engine records whether each sent email started from the template or
+from Claude, and measures edits against that draft. Insights reports both edit
+rates and suggests template or prompt reviews.</li>
+</ul>
+</li>
+<li><p><strong>Business rules are configuration.</strong> Validations, fee calculations and
+decision tables live in versioned rule sets (<code>config/rules/</code>), written in a
+small, safe expression language that is checked at startup. A rule set runs as
+a playbook step (<code>rules.evaluate</code>). Its result is stored on the task, later
+steps can read it (<code>steps[&#39;id&#39;].outputs…</code>), and any step can be made
+conditional on it with <code>when</code> (false means skipped and audited; an error goes
+to a person). Each rule set carries test cases that <code>npm test</code> runs. Clients
+can swap a rule set via <code>ruleSetOverrides</code>. See <a href="rules.html">RULES.md</a>.</p>
+</li>
+<li><p><strong>External systems are configuration, and TRAC is one of them.</strong> Each system
+(<code>config/integrations/</code>) declares its URL, auth (secrets by environment
+variable name only), timeout, retry policy and operations, with request
+bodies and response mappings written in the rules language. Steps call them
+with <code>integration.call</code>, and the built-in TRAC actions use the same client. Only
+idempotent operations are retried, and they carry an idempotency key. Failures
+after retries become exceptions for a person. The call log records outcomes
+and timing, never bodies or secrets. Built-in mocks behind <code>mock://</code> URLs keep
+the demo and tests self-contained while exercising the same HTTP contract. The
+engine is async, with work on each case serialized. See
+<a href="integrations.html">INTEGRATIONS.md</a>.</p>
+</li>
+<li><p><strong>AI agents are steps, and their output is a proposal.</strong> An <code>ai.agent</code> step
+must be <code>REVIEW</code> mode. The agent runs when the step becomes ready. It sees only
+its configured input, can call only read-only integration operations, and must
+return its output schema. A person approves or edits the proposal, which is
+validated again, and only the approved result feeds later steps. A rule set
+after the agent checks the approved output. If AI is unavailable, the person
+enters the result by hand. See <a href="agents.html">AGENTS.md</a>.</p>
+</li>
+</ol>
+<p>So a process mixes four kinds of step: <strong>integration</strong> (fetch or update an
+external system), <strong>rules</strong> (logic and decisions), <strong>AI agent</strong> (proposal) and
+<strong>person</strong> (review, approval, manual work), connected by dependencies and <code>when</code>
+conditions and passing data through <code>steps[&#39;&lt;id&gt;&#39;]</code>.</p>
+<h2 id="task-state-machine">Task state machine</h2>
+<pre><code>BLOCKED ──deps done──► (step `when` false ─► SKIPPED)
+                         READY ──(AUTO)──► run ──ok──► DONE
+                         │                  └─fail─► READY + exception ─► routed to a person
+                         ├──(REVIEW/MANUAL)─► routed ─► IN_PROGRESS ─► DONE
+                         └── no eligible user ─► stays in skill queue; re-routed when
+                                                 capacity frees up or users are imported
+Case: OPEN ─all tasks DONE/SKIPPED─► COMPLETED      (cancel ─► CANCELLED, open tasks SKIPPED)
+</code></pre>
+<h2 id="routing-policy">Routing policy</h2>
+<p>Eligible users are active, hold the task&#39;s skill at or above <code>minSkillLevel</code>, and
+are below capacity. Skill level decides who <strong>may</strong> take a task (for example,
+sponsor verification, 408(b)(2) disclosures and contact-change call-backs need
+COMPLIANCE level 2+); it does not decide who gets it. Among eligible users the
+router picks the lowest load ratio (open tasks ÷ capacity), then whoever was
+assigned work <strong>least recently</strong> (round-robin, taken from the strictly ordered
+audit log), then user id. Equally loaded people therefore take turns, so work is
+split evenly regardless of seniority. With no eligible user the task waits in the
+unassigned queue, and Insights reports the backlog by skill.</p>
+<h2 id="regulatory-touchpoints-modelled-illustrative-not-legal-advice">Regulatory touchpoints modelled (illustrative, not legal advice)</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Reference</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Fee disclosure at installation and on fee change</td>
+<td>ERISA 408(b)(2)</td>
+</tr>
+<tr>
+<td>Default investment in the lineup</td>
+<td>QDIA, ERISA 404(c)(5)</td>
+</tr>
+<tr>
+<td>Fund lineup change notice (30–60 days)</td>
+<td>ERISA 404(c)(4)</td>
+</tr>
+<tr>
+<td>Blackout notice on deconversion (≥30 days)</td>
+<td>ERISA 101(i)</td>
+</tr>
+<tr>
+<td>Contact change call-back, sponsor verification</td>
+<td>Firm fraud / KYC policy</td>
+</tr>
+</tbody></table></div>
+<p>The termination fee model (<code>calculateTerminationFees</code>) is a placeholder: prorated
+asset and per-participant fees plus a flat deconversion fee. Replace it with the
+actual contract terms.</p>
+<h2 id="path-to-production">Path to production</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Prototype</th>
+<th>Production</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>node:sqlite</code> document store</td>
+<td>Postgres with real tables (the services use only the <code>Collection</code> interface)</td>
+</tr>
+<tr>
+<td><code>mock://trac</code></td>
+<td>Set <code>TRAC_BASE_URL</code> / <code>TRAC_API_KEY</code> for the real API; add reconciliation</td>
+</tr>
+<tr>
+<td>Outbox table</td>
+<td>Mail service + template/document service (PDF notices)</td>
+</tr>
+<tr>
+<td>In-process <code>advance()</code> with a lock per case</td>
+<td>Durable workflow engine or job queue (e.g. Temporal, or a DB-backed outbox), so external calls don&#39;t hold requests open and survive restarts</td>
+</tr>
+<tr>
+<td><code>x-user-id</code> header</td>
+<td>OIDC/SAML login; authorization by role and skill</td>
+</tr>
+<tr>
+<td>Regex &quot;OCR&quot; parser</td>
+<td>IDP/OCR service with per-field confidence and low-confidence review</td>
+</tr>
+<tr>
+<td>On-demand Claude assist</td>
+<td>Build an eval set from real cases before changing the prompt or model; consider pre-generating assists when tasks become ready; add retrieval over policy documents for the knowledge base</td>
+</tr>
+</tbody></table></div>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="api.html"><small>Previous</small>API reference</a>
+      <a href="faq.html" style="text-align:right"><small>Next</small>FAQ and troubleshooting</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#purpose">Purpose</a><a href="#lifecycle-case-types">Lifecycle → case types</a><a href="#components">Components</a><a href="#key-design-decisions">Key design decisions</a><a href="#task-state-machine">Task state machine</a><a href="#routing-policy">Routing policy</a><a href="#regulatory-touchpoints-modelled-illustrative-not-legal-advice">Regulatory touchpoints modelled (illustrative, not legal advice)</a><a href="#path-to-production">Path to production</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

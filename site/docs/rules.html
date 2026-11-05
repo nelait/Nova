@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Rules module · Plan Ops Hub docs</title>
+<meta name="description" content="Validations, calculations and decision tables as configuration." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html" aria-current="page">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Rules module</h1>
+<p>Business rules live in <code>config/rules/*.json</code>, not in code. A rule set is
+versioned, checked when the system starts, carries its own test cases, and runs
+as a step in any process definition (playbook).</p>
+<h2 id="using-a-rule-set-as-a-process-step">Using a rule set as a process step</h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;validate-intake&quot;,
+  &quot;name&quot;: &quot;Validate onboarding data&quot;,
+  &quot;skill&quot;: &quot;PLAN_SETUP&quot;,
+  &quot;mode&quot;: &quot;AUTO&quot;,
+  &quot;action&quot;: { &quot;type&quot;: &quot;rules.evaluate&quot;, &quot;params&quot;: { &quot;ruleSet&quot;: &quot;installation-intake&quot; } }
+}
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Outcome</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>No error-severity rule fails</td>
+<td>Step is DONE. The full result (outputs, decisions, issues, trace) is stored on the task and later steps can use it.</td>
+</tr>
+<tr>
+<td>Warnings only</td>
+<td>Step still passes; warnings are shown with the result</td>
+</tr>
+<tr>
+<td>An error-severity rule fails</td>
+<td><code>AUTO</code> step becomes an exception routed to a person (fix and retry, or override with justification). <code>REVIEW</code> step cannot be approved.</td>
+</tr>
+<tr>
+<td>A rule can&#39;t be evaluated (e.g. a number is missing)</td>
+<td>Counted as an error. Rules never fail silently.</td>
+</tr>
+</tbody></table></div>
+<h3 id="conditional-steps">Conditional steps</h3>
+<p>Any playbook step can have a <code>when</code> condition. It is evaluated once the step&#39;s
+dependencies are done. If it is false, the step is <strong>skipped</strong> (recorded in the
+audit trail with the condition). If it can&#39;t be evaluated, the step goes to a
+person rather than being silently skipped or run.</p>
+<pre><code class="language-json">{ &quot;id&quot;: &quot;enrollment-meetings&quot;, &quot;when&quot;: &quot;steps[&#39;validate-intake&#39;].decisions.segment.enrollmentMeetings == true&quot;, ... }
+</code></pre>
+<h2 id="rule-set-format">Rule set format</h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;installation-intake&quot;,
+  &quot;version&quot;: 1,
+  &quot;name&quot;: &quot;New plan onboarding checks&quot;,
+  &quot;decisions&quot;: [
+    { &quot;id&quot;: &quot;segment&quot;, &quot;rows&quot;: [
+      { &quot;when&quot;: &quot;plan.details.employeeCount &lt; 100&quot;,  &quot;then&quot;: { &quot;name&quot;: &quot;small&quot;, &quot;enrollmentMeetings&quot;: false } },
+      { &quot;when&quot;: &quot;plan.details.employeeCount &lt; 1000&quot;, &quot;then&quot;: { &quot;name&quot;: &quot;mid-market&quot;, &quot;enrollmentMeetings&quot;: true } },
+      { &quot;then&quot;: { &quot;name&quot;: &quot;large&quot;, &quot;enrollmentMeetings&quot;: true } }
+    ]}
+  ],
+  &quot;outputs&quot;: [
+    { &quot;name&quot;: &quot;qdiaCount&quot;, &quot;label&quot;: &quot;QDIA funds in lineup&quot;, &quot;expr&quot;: &quot;countWhere(plan.details.funds, &#39;qdia&#39;, true)&quot;, &quot;format&quot;: &quot;number&quot; }
+  ],
+  &quot;rules&quot;: [
+    { &quot;id&quot;: &quot;one-qdia&quot;, &quot;when&quot;: &quot;len(plan.details.funds) &gt; 0&quot;, &quot;assert&quot;: &quot;outputs.qdiaCount == 1&quot;,
+      &quot;severity&quot;: &quot;error&quot;, &quot;message&quot;: &quot;Fund lineup must have exactly one QDIA (found {{outputs.qdiaCount}})&quot;,
+      &quot;reference&quot;: &quot;ERISA 404(c)(5)&quot; }
+  ],
+  &quot;tests&quot;: [
+    { &quot;name&quot;: &quot;two QDIAs fail&quot;, &quot;context&quot;: { &quot;plan&quot;: { &quot;details&quot;: { &quot;funds&quot;: [{ &quot;qdia&quot;: true }, { &quot;qdia&quot;: true }] } } },
+      &quot;expect&quot;: { &quot;passed&quot;: false, &quot;failing&quot;: [&quot;one-qdia&quot;, &quot;...&quot;] } }
+  ]
+}
+</code></pre>
+<p>Evaluation order: <strong>decision tables</strong> (first matching row wins; a row without
+<code>when</code> is the default) → <strong>outputs</strong> (in order; each can use earlier ones via
+<code>outputs.&lt;name&gt;</code>) → <strong>rules</strong> (can use both). Severities are <code>error</code> (blocks),
+<code>warning</code> and <code>info</code>. Output formats are <code>usd</code>, <code>number</code>, <code>percent</code>, <code>date</code>,
+<code>text</code> and <code>boolean</code>, and are used for display.</p>
+<h2 id="data-a-rule-can-read">Data a rule can read</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>plan</code></td>
+<td><code>id</code>, <code>status</code>, <code>tracPlanId</code>, <code>details</code> (sponsor, EIN, contacts, funds, fees, …)</td>
+</tr>
+<tr>
+<td><code>request</code></td>
+<td>The case&#39;s request data (new contact, new fund lineup, termination details, …)</td>
+</tr>
+<tr>
+<td><code>case</code></td>
+<td><code>id</code>, <code>type</code>, <code>channel</code>, <code>clientId</code></td>
+</tr>
+<tr>
+<td><code>steps</code></td>
+<td>Results of completed steps, by step id: <code>steps[&#39;validate-intake&#39;].outputs.qdiaCount</code></td>
+</tr>
+<tr>
+<td><code>today</code></td>
+<td><code>YYYY-MM-DD</code></td>
+</tr>
+<tr>
+<td><code>client</code></td>
+<td>Client id</td>
+</tr>
+<tr>
+<td><code>decisions</code>, <code>outputs</code></td>
+<td>This rule set&#39;s own results (rule sets only, not step conditions)</td>
+</tr>
+</tbody></table></div>
+<h2 id="expression-language">Expression language</h2>
+<p><code>and or not</code>, <code>== != &lt; &lt;= &gt; &gt;=</code>, <code>in</code>, <code>+ - * / %</code>, <code>cond ? a : b</code>, <code>[lists]</code>,
+field access with <code>.</code> or <code>[&#39;key&#39;]</code>. Text compares as text, so ISO dates compare
+correctly. Reading a missing field gives a missing value instead of an error;
+arithmetic on a missing value is an error (so a bad calculation is never silent).</p>
+<p>Functions: <code>len isBlank isNumber isDate coalesce countWhere any find pluck hasDuplicates sum min max abs round floor ceil lower upper trim startsWith endsWith contains matches emailDomain daysBetween addDays quarterStart year usd</code>.
+The <strong>Rules</strong> screen and <code>GET /api/rules/functions</code> list them with descriptions.</p>
+<p><strong>Safety.</strong> Expressions are parsed by a dedicated parser, never <code>eval</code>. They can
+only read the data above (own fields only; <code>__proto__</code>, <code>constructor</code> and
+<code>prototype</code> are refused), can only call the listed functions, can&#39;t loop, and
+have length and nesting limits. Unknown names, unknown functions and wrong
+argument counts are rejected when the configuration loads.</p>
+<h2 id="per-client-rules">Per-client rules</h2>
+<p>A client can swap a rule set for its own version:</p>
+<pre><code class="language-json">// config/clients/acme-premium.json
+&quot;ruleSetOverrides&quot;: { &quot;termination-fees&quot;: &quot;termination-fees-premium&quot; }
+</code></pre>
+<h2 id="testing-and-trying-rules">Testing and trying rules</h2>
+<ul>
+<li><code>npm test</code> runs every rule set&#39;s embedded test cases, so a rule change that breaks an example fails the build.</li>
+<li>The <strong>Rules</strong> screen shows each rule set (decision tables, formulas, checks), runs its tests, and evaluates it read-only against any live case.</li>
+<li>API: <code>GET /api/rules</code>, <code>GET /api/rules/:id</code>, <code>POST /api/rules/:id/test</code>, <code>POST /api/rules/:id/evaluate</code> with <code>{caseId}</code> or <code>{context}</code>.</li>
+</ul>
+<h2 id="rule-sets-included">Rule sets included</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Rule set</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>installation-intake</code></td>
+<td>Installation: validate onboarding data, classify plan size (drives the enrollment-meetings step)</td>
+</tr>
+<tr>
+<td><code>contact-change</code></td>
+<td>Contact change: validation, plus a fraud warning when the new email domain differs from the sponsor&#39;s</td>
+</tr>
+<tr>
+<td><code>fund-change</code></td>
+<td>Fund change: lineup checks, 30–60 day notice window</td>
+</tr>
+<tr>
+<td><code>fee-change</code></td>
+<td>Fee change: completeness, warning on large increases</td>
+</tr>
+<tr>
+<td><code>termination-request</code></td>
+<td>Termination: request checks, blackout notice timing</td>
+</tr>
+<tr>
+<td><code>termination-fees</code></td>
+<td>Termination: prorated fee calculation</td>
+</tr>
+<tr>
+<td><code>termination-fees-premium</code></td>
+<td>Premium clients: deconversion fee waived</td>
+</tr>
+</tbody></table></div>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="playbooks.html"><small>Previous</small>Process definitions</a>
+      <a href="integrations.html" style="text-align:right"><small>Next</small>Integration module</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#using-a-rule-set-as-a-process-step">Using a rule set as a process step</a><a href="#rule-set-format">Rule set format</a><a href="#data-a-rule-can-read">Data a rule can read</a><a href="#expression-language">Expression language</a><a href="#per-client-rules">Per-client rules</a><a href="#testing-and-trying-rules">Testing and trying rules</a><a href="#rule-sets-included">Rule sets included</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

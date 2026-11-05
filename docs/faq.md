@@ -1,0 +1,53 @@
+# FAQ and troubleshooting
+
+## Adoption
+
+**Do we have to replace our recordkeeper?**
+No. The recordkeeper stays the system of record. The hub orchestrates the work
+around it and commits results through a configured integration.
+
+**Can we change a process without a developer?**
+Process steps, rules, email templates, client variations and AI agents are all
+configuration files under `config/`. Business analysts can change them; review
+changes like code and run `npm test`, which runs every rule set's own test cases.
+
+**Does it work without AI?**
+Yes. Claude is optional. Without it, Ask Claude is hidden and AI agent steps ask
+the person to enter the result by hand.
+
+**Can AI change our records or skip a step?**
+No. AI never decides which steps run. Its output is a proposal a person approves,
+agents can only use read-only lookups, and the hub blocks any email that drops a
+required fact.
+
+**How do clients with special service terms fit in?**
+Each client can have a variant of any process (extra steps, different automation,
+its own templates or rule sets) without forking the standard process. See
+[Process definitions](playbooks.md#per-client-variations).
+
+## Troubleshooting
+
+**The server won't start and names a playbook, rule set, integration or agent.**
+Configuration is checked at startup. The message names the file, the step or rule,
+and the problem, for example `Unknown name "nope"` or `uses unknown rule set`.
+
+**A task says "exception".**
+An automatic step failed. The message says why: a failed rule, an unreachable
+system after retries, or an AI agent error. Fix the cause and click **Retry**, or
+**Override** with a reason.
+
+**A task is in the unassigned queue.**
+No active user holds the skill at the required level with spare capacity. Add or
+cross-train someone (SCIM import), raise a capacity, or reassign work. Routing runs
+again automatically.
+
+**An email can't be sent: "missing required facts".**
+The edited email dropped a value the template inserted, such as a fee or date.
+Put the value back. It may be reformatted (`$2,500` for `2500`) but not removed.
+
+**"secret TRAC_API_KEY is not set".**
+A real recordkeeper URL is configured without its key. Set the environment
+variable, or unset `TRAC_BASE_URL` to use the mock.
+
+**Ask Claude or an agent says AI is not configured.**
+Set `ANTHROPIC_API_KEY` and restart.

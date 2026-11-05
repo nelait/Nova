@@ -10,12 +10,14 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",
+    "site:build": "node --disable-warning=ExperimentalWarning scripts/build-site.ts",
     "try:agent": "node --disable-warning=ExperimentalWarning scripts/try-fund-mapping-agent.ts",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "marked": "^15.0.12",
     "typescript": "^5.8.0"
   },
   "dependencies": {

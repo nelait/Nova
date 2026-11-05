@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>FAQ and troubleshooting · Plan Ops Hub docs</title>
+<meta name="description" content="Adoption questions and troubleshooting." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html" aria-current="page">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>FAQ and troubleshooting</h1>
+<h2 id="adoption">Adoption</h2>
+<p><strong>Do we have to replace our recordkeeper?</strong>
+No. The recordkeeper stays the system of record. The hub orchestrates the work
+around it and commits results through a configured integration.</p>
+<p><strong>Can we change a process without a developer?</strong>
+Process steps, rules, email templates, client variations and AI agents are all
+configuration files under <code>config/</code>. Business analysts can change them; review
+changes like code and run <code>npm test</code>, which runs every rule set&#39;s own test cases.</p>
+<p><strong>Does it work without AI?</strong>
+Yes. Claude is optional. Without it, Ask Claude is hidden and AI agent steps ask
+the person to enter the result by hand.</p>
+<p><strong>Can AI change our records or skip a step?</strong>
+No. AI never decides which steps run. Its output is a proposal a person approves,
+agents can only use read-only lookups, and the hub blocks any email that drops a
+required fact.</p>
+<p><strong>How do clients with special service terms fit in?</strong>
+Each client can have a variant of any process (extra steps, different automation,
+its own templates or rule sets) without forking the standard process. See
+<a href="playbooks.html#per-client-variations">Process definitions</a>.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p><strong>The server won&#39;t start and names a playbook, rule set, integration or agent.</strong>
+Configuration is checked at startup. The message names the file, the step or rule,
+and the problem, for example <code>Unknown name &quot;nope&quot;</code> or <code>uses unknown rule set</code>.</p>
+<p><strong>A task says &quot;exception&quot;.</strong>
+An automatic step failed. The message says why: a failed rule, an unreachable
+system after retries, or an AI agent error. Fix the cause and click <strong>Retry</strong>, or
+<strong>Override</strong> with a reason.</p>
+<p><strong>A task is in the unassigned queue.</strong>
+No active user holds the skill at the required level with spare capacity. Add or
+cross-train someone (SCIM import), raise a capacity, or reassign work. Routing runs
+again automatically.</p>
+<p><strong>An email can&#39;t be sent: &quot;missing required facts&quot;.</strong>
+The edited email dropped a value the template inserted, such as a fee or date.
+Put the value back. It may be reformatted (<code>$2,500</code> for <code>2500</code>) but not removed.</p>
+<p><strong>&quot;secret TRAC_API_KEY is not set&quot;.</strong>
+A real recordkeeper URL is configured without its key. Set the environment
+variable, or unset <code>TRAC_BASE_URL</code> to use the mock.</p>
+<p><strong>Ask Claude or an agent says AI is not configured.</strong>
+Set <code>ANTHROPIC_API_KEY</code> and restart.</p>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="architecture.html"><small>Previous</small>Architecture</a>
+      
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#adoption">Adoption</a><a href="#troubleshooting">Troubleshooting</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Users and routing · Plan Ops Hub docs</title>
+<meta name="description" content="Skills, levels, SCIM import, and how work is routed." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html" aria-current="page">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Users and routing</h1>
+<h2 id="users-and-skills">Users and skills</h2>
+<p>Each user has skills with a level from 1 to 3 (1 trainee, 2 proficient, 3 expert)
+and a capacity: the most open tasks they should hold at once.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Typical work</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>PLAN_SETUP</code></td>
+<td>Onboarding data, welcome emails, recordkeeper installs</td>
+</tr>
+<tr>
+<td><code>MAINTENANCE</code></td>
+<td>Contact, fund and fee changes</td>
+</tr>
+<tr>
+<td><code>COMPLIANCE</code></td>
+<td>Sponsor verification, call-backs, fee disclosures, termination authorization</td>
+</tr>
+<tr>
+<td><code>INVESTMENTS</code></td>
+<td>Fund lineups, fund mapping</td>
+</tr>
+<tr>
+<td><code>TERMINATIONS</code></td>
+<td>Termination fees, blackout notices, deconversion</td>
+</tr>
+</tbody></table></div>
+<p>You can add skills freely: a skill is any name a playbook step uses.</p>
+<h2 id="loading-users-from-your-identity-provider">Loading users from your identity provider</h2>
+<p>Users come from your identity provider through a SCIM 2.0 import. Skills are
+groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>, so skill administration stays in the
+identity provider:</p>
+<pre><code class="language-http">POST /api/users/import/scim
+{
+  &quot;source&quot;: &quot;okta&quot;,
+  &quot;fullSync&quot;: true,
+  &quot;Resources&quot;: [
+    { &quot;id&quot;: &quot;901&quot;, &quot;userName&quot;: &quot;kai@example.com&quot;, &quot;displayName&quot;: &quot;Kai Brown&quot;,
+      &quot;groups&quot;: [{ &quot;display&quot;: &quot;skill:INVESTMENTS:2&quot; }, { &quot;display&quot;: &quot;skill:TERMINATIONS:2&quot; }] }
+  ]
+}
+</code></pre>
+<p>With <code>fullSync</code>, users from that source who are missing from the batch are
+deactivated. Importing re-runs routing, so waiting tasks go to newly qualified
+people straight away. The <strong>Team &amp; skills</strong> screen does the same import from a
+pasted payload. For local testing, <code>config/users.json</code> seeds a sample team.</p>
+<h2 id="how-work-is-routed">How work is routed</h2>
+<ol>
+<li><strong>Eligible:</strong> active, holds the step&#39;s skill at or above its minimum level, and below capacity.</li>
+<li><strong>Least loaded:</strong> the lowest ratio of open tasks to capacity.</li>
+<li><strong>Ties rotate:</strong> among equally loaded people, whoever was assigned work least recently goes next. Seniority does not win ties, so work is shared evenly.</li>
+<li><strong>Deterministic:</strong> the final tie-break is the user id.</li>
+</ol>
+<p>If nobody is eligible, the task waits in the unassigned queue and is routed as soon
+as someone frees up or a qualified user is added. <strong>Insights</strong> shows the backlog by
+skill.</p>
+<p>Skill level controls who <strong>may</strong> take a task, not who gets it. Use <code>minSkillLevel</code>
+for work a trainee should never do. In the sample configuration, every
+<code>COMPLIANCE</code> step requires level 2, and a test enforces that policy.</p>
+<h2 id="reassigning">Reassigning</h2>
+<p>Anyone can send a task back through routing (<strong>Reassign</strong>), which excludes the
+current owner, or to a named person, who must hold the skill at the required
+level. Every assignment and reassignment is in the audit trail with the reason.</p>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="agents.html"><small>Previous</small>AI agents as process steps</a>
+      <a href="deployment.html" style="text-align:right"><small>Next</small>Deployment</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#users-and-skills">Users and skills</a><a href="#loading-users-from-your-identity-provider">Loading users from your identity provider</a><a href="#how-work-is-routed">How work is routed</a><a href="#reassigning">Reassigning</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

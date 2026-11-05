@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Getting started · Plan Ops Hub docs</title>
+<meta name="description" content="From checkout to a completed plan installation in fifteen minutes." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html" aria-current="page">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Getting started</h1>
+<p>This guide takes you from a fresh checkout to a completed plan installation in
+about fifteen minutes.</p>
+<h2 id="1-install-and-run-the-demo">1. Install and run the demo</h2>
+<p>You need Node.js 22.18 or newer.</p>
+<pre><code class="language-bash">git clone https://github.com/nelait/Nova.git plan-ops
+cd plan-ops
+npm install
+npm run demo        # http://localhost:3000
+</code></pre>
+<p><code>npm run demo</code> starts an in-memory instance with 15 sample cases for fictional
+plan sponsors: completed installations, plan changes, a termination in progress,
+a suspicious contact change, and cases stuck on bad data. Nothing is written to
+disk. To start with an empty, persistent database instead, run <code>npm start</code>.</p>
+<h2 id="2-look-around-as-different-people">2. Look around as different people</h2>
+<p>The <strong>Working as</strong> picker in the sidebar switches between the sample team. Each
+person sees only the work routed to them:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Person</th>
+<th>Skills</th>
+<th>What you&#39;ll find in their inbox</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Priya Shah</td>
+<td>Plan setup L3, Maintenance L2</td>
+<td>Welcome emails, recordkeeper installs</td>
+</tr>
+<tr>
+<td>Marcus Lee</td>
+<td>Plan setup L1, Maintenance L3</td>
+<td>An application with an invalid EIN</td>
+</tr>
+<tr>
+<td>Elena Garcia</td>
+<td>Compliance L3</td>
+<td>Sponsor verification, fee disclosures</td>
+</tr>
+<tr>
+<td>Rafael Torres</td>
+<td>Compliance L2</td>
+<td>Contact-change call-backs, disclosures</td>
+</tr>
+<tr>
+<td>Sam Okafor</td>
+<td>Investments L3</td>
+<td>An AI-proposed fund mapping, a closed fund</td>
+</tr>
+<tr>
+<td>Dana Kim</td>
+<td>Terminations L3</td>
+<td>Termination fees, a blackout notice</td>
+</tr>
+</tbody></table></div>
+<h2 id="3-work-a-task">3. Work a task</h2>
+<ol>
+<li>Switch to Elena or Rafael, open <strong>My work</strong>, and pick the 408(b)(2) fee disclosure.</li>
+<li>Read the guidance and the regulatory reference, and tick the checklist.</li>
+<li>Optionally click <strong>Ask Claude</strong> for a case-specific briefing and a rewritten draft. Without an API key the demo shows labeled sample responses.</li>
+<li>Click <strong>Approve &amp; execute</strong>. The email goes to the outbox, the next step unblocks, and the audit trail records it all.</li>
+</ol>
+<h2 id="4-submit-your-first-request">4. Submit your first request</h2>
+<p>Open <strong>New request</strong>, keep the sample installation, and click <strong>Submit</strong>. Then
+open <strong>Cases</strong> and watch it move:</p>
+<ul>
+<li>Automatic steps run immediately: validation rules, contact setup, a fund lookup in the fund catalog, and an availability check.</li>
+<li>Human steps go to the right people by skill, with a due time.</li>
+<li>When the last step installs the plan on the recordkeeper, the case completes and the plan appears under <strong>Recordkeeper</strong>.</li>
+</ul>
+<p>Switch the channel to <strong>Paper</strong> to see a paper form&#39;s scanned text turned into the same structured request.</p>
+<h2 id="5-connect-real-systems">5. Connect real systems</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>To do this</th>
+<th>Set</th>
+<th>Read</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Use your recordkeeper instead of the mock</td>
+<td><code>TRAC_BASE_URL</code>, <code>TRAC_API_KEY</code></td>
+<td><a href="integrations.html">Integrations</a></td>
+</tr>
+<tr>
+<td>Use your fund catalog</td>
+<td><code>FUND_CATALOG_URL</code></td>
+<td><a href="integrations.html">Integrations</a></td>
+</tr>
+<tr>
+<td>Turn on Claude for drafting and AI agent steps</td>
+<td><code>ANTHROPIC_API_KEY</code></td>
+<td><a href="agents.html">AI agents</a></td>
+</tr>
+<tr>
+<td>Load your team</td>
+<td>SCIM import from your identity provider</td>
+<td><a href="users-and-routing.html">Users and routing</a></td>
+</tr>
+</tbody></table></div>
+<p>Then adapt the processes to your service model: <a href="playbooks.html">Process definitions</a>,
+<a href="rules.html">Rules</a>, and per-client variations.</p>
+<h2 id="6-before-you-go-live">6. Before you go live</h2>
+<p>Read <a href="deployment.html">Deployment</a>. The prototype has no login yet, so do not
+expose it to a network as it is.</p>
+
+    <nav class="pager" aria-label="Previous and next">
+      <span></span>
+      <a href="concepts.html" style="text-align:right"><small>Next</small>Concepts</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#1-install-and-run-the-demo">1. Install and run the demo</a><a href="#2-look-around-as-different-people">2. Look around as different people</a><a href="#3-work-a-task">3. Work a task</a><a href="#4-submit-your-first-request">4. Submit your first request</a><a href="#5-connect-real-systems">5. Connect real systems</a><a href="#6-before-you-go-live">6. Before you go live</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

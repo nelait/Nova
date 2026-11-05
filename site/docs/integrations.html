@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Integration module · Plan Ops Hub docs</title>
+<meta name="description" content="Connect the recordkeeper and other systems without adapter code." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html" aria-current="page">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Integration module</h1>
+<p>External systems are configuration in <code>config/integrations/*.json</code>: where they
+are, how to authenticate, timeout and retry policy, and the operations the hub may
+call, including how requests are built from case data and how responses are
+mapped back. Process steps call them with <code>&quot;type&quot;: &quot;integration.call&quot;</code>, and the
+built-in TRAC actions (install, update, terminate, refresh) go through the same
+layer.</p>
+<h2 id="defining-a-system">Defining a system</h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;trac&quot;,
+  &quot;name&quot;: &quot;TRAC recordkeeper&quot;,
+  &quot;baseUrl&quot;: &quot;${TRAC_BASE_URL:-mock://trac}&quot;,
+  &quot;auth&quot;: { &quot;type&quot;: &quot;apiKey&quot;, &quot;header&quot;: &quot;X-API-Key&quot;, &quot;secretEnv&quot;: &quot;TRAC_API_KEY&quot; },
+  &quot;timeoutMs&quot;: 10000,
+  &quot;retry&quot;: { &quot;attempts&quot;: 3, &quot;backoffMs&quot;: 250, &quot;onStatus&quot;: [429, 502, 503, 504] },
+  &quot;idempotencyHeader&quot;: &quot;Idempotency-Key&quot;,
+  &quot;healthCheck&quot;: &quot;health&quot;,
+  &quot;operations&quot;: {
+    &quot;getPlan&quot;: {
+      &quot;method&quot;: &quot;GET&quot;,
+      &quot;path&quot;: &quot;/plans/{{plan.tracPlanId}}&quot;,
+      &quot;response&quot;: { &quot;participantCount&quot;: &quot;response.participants&quot;, &quot;planAssetsUsd&quot;: &quot;response.assetsUsd&quot; }
+    },
+    &quot;installPlan&quot;: {
+      &quot;method&quot;: &quot;POST&quot;,
+      &quot;path&quot;: &quot;/plans&quot;,
+      &quot;idempotent&quot;: true,
+      &quot;body&quot;: { &quot;sponsor&quot;: { &quot;name&quot;: &quot;=plan.details.sponsorName&quot;, &quot;ein&quot;: &quot;=plan.details.ein&quot; }, &quot;participants&quot;: &quot;=plan.details.employeeCount&quot; },
+      &quot;response&quot;: { &quot;tracPlanId&quot;: &quot;response.id&quot; }
+    }
+  }
+}
+</code></pre>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>baseUrl</code></td>
+<td><code>https://…</code> (plain <code>http</code> only for localhost) or <code>mock://&lt;name&gt;</code> for a built-in mock. <code>${VAR}</code> / <code>${VAR:-default}</code> read the environment.</td>
+</tr>
+<tr>
+<td><code>auth</code></td>
+<td><code>none</code>, <code>apiKey</code> (header), <code>bearer</code>, <code>basic</code>, or <code>oauth2ClientCredentials</code> (token fetched, cached until expiry, refreshed after a 401). Settings name <strong>environment variables</strong>; secrets are never in config, never shown and never logged.</td>
+</tr>
+<tr>
+<td><code>timeoutMs</code>, <code>retry</code></td>
+<td>Per attempt timeout. Retries back off exponentially, on network errors, timeouts and the listed statuses.</td>
+</tr>
+<tr>
+<td><code>path</code>, <code>query</code></td>
+<td><code>{{expression}}</code> placeholders, URL-encoded so data can&#39;t change the route (<code>../admin</code> becomes <code>..%2Fadmin</code>).</td>
+</tr>
+<tr>
+<td><code>body</code></td>
+<td>JSON template. Strings starting with <code>=</code> are expressions; everything else is sent as-is.</td>
+</tr>
+<tr>
+<td><code>response</code></td>
+<td>One expression, or an object of field → expression, over <code>response</code> (parsed JSON), <code>status</code> and <code>input</code>. Without it, the whole response is returned.</td>
+</tr>
+<tr>
+<td><code>idempotent</code></td>
+<td>Writes are retried only when marked idempotent. The hub then sends an idempotency key (<code>caseId:stepId</code>), so a retry is applied once. <code>GET</code> is always retry-safe.</td>
+</tr>
+</tbody></table></div>
+<p>Expressions use the <a href="rules.html">rules language</a> and can read <code>input</code>, <code>plan</code>,
+<code>request</code>, <code>case</code>, <code>steps</code>, <code>today</code> and <code>client</code>. Every expression is compiled when
+the system starts, and a playbook that calls an unknown system or operation is
+rejected at startup.</p>
+<h2 id="using-a-system-in-a-process">Using a system in a process</h2>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;fetch-fund-data&quot;,
+  &quot;name&quot;: &quot;Look up funds in the fund catalog&quot;,
+  &quot;mode&quot;: &quot;AUTO&quot;,
+  &quot;action&quot;: {
+    &quot;type&quot;: &quot;integration.call&quot;,
+    &quot;params&quot;: { &quot;system&quot;: &quot;fund-catalog&quot;, &quot;operation&quot;: &quot;lookupFunds&quot;, &quot;input&quot;: { &quot;tickers&quot;: &quot;=pluck(plan.details.funds, &#39;ticker&#39;)&quot; } }
+  }
+}
+</code></pre>
+<p>The step&#39;s result is <code>{ system, operation, status, attempts, durationMs, callId, data }</code>.
+Later steps and rules read it as <code>steps[&#39;fetch-fund-data&#39;].data…</code>. The installation
+playbook chains three step types:</p>
+<pre><code>fetch-fund-data (integration) ─► check-fund-availability (rules) ─► review-fund-lineup (person)
+</code></pre>
+<p>If a call fails after its retries, the step becomes an exception routed to a
+person, who can <strong>Retry</strong> once the system is back, or override with a written
+justification. A <code>REVIEW</code>-mode integration step shows the person exactly which
+system, operation and input will be used before they approve it.</p>
+<h2 id="switching-from-mock-to-a-real-system">Switching from mock to a real system</h2>
+<p>TRAC and the fund catalog point at built-in mocks by default (<code>mock://trac</code>,
+<code>mock://fund-catalog</code>), so the demo and tests need no setup. The mocks are REST
+handlers with their own field names, so the request and response mappings are
+exercised exactly as they would be against the real system. To go live:</p>
+<pre><code class="language-bash">TRAC_BASE_URL=https://trac.example.com/api TRAC_API_KEY=… npm start
+</code></pre>
+<p>Nothing else changes. A real URL without its secret fails with
+<code>secret TRAC_API_KEY is not set</code> rather than calling unauthenticated.</p>
+<h2 id="admin-and-observability">Admin and observability</h2>
+<ul>
+<li><strong>Integrations screen:</strong> systems, live or mock, auth type, whether each required secret is set (never the value), timeout and retry, operations and which steps use them, a <strong>Test connection</strong> button (runs the <code>healthCheck</code> operation), and the call log.</li>
+<li><strong>Call log</strong> (<code>GET /api/integrations/calls</code>): time, system.operation, method, path, status, attempts, duration, case, task and actor. Request and response bodies are <strong>not</strong> stored because they can contain personal data. Query strings are not logged.</li>
+<li><strong>Recordkeeper screen</strong> reads TRAC through <code>listPlans</code>, the same path the engine uses.</li>
+</ul>
+<h2 id="adding-a-new-system">Adding a new system</h2>
+<ol>
+<li>Add <code>config/integrations/&lt;id&gt;.json</code> with its operations.</li>
+<li>Set its environment variables.</li>
+<li>Call it from a playbook step with <code>integration.call</code>, and check its data with a rule set if needed.</li>
+<li>Optional: for demos and tests, register an in-process mock with <code>integrations.registerMock(&#39;&lt;id&gt;&#39;, handler)</code> and point <code>baseUrl</code> at <code>${X_URL:-mock://&lt;id&gt;}</code>.</li>
+</ol>
+<h2 id="path-to-production">Path to production</h2>
+<p>External calls currently run inline when a step becomes ready, guarded by a lock
+per case. For production, move them to a durable job queue so a slow or
+unavailable system doesn&#39;t hold a request open, and add reconciliation against
+the recordkeeper.</p>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="rules.html"><small>Previous</small>Rules module</a>
+      <a href="agents.html" style="text-align:right"><small>Next</small>AI agents as process steps</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#defining-a-system">Defining a system</a><a href="#using-a-system-in-a-process">Using a system in a process</a><a href="#switching-from-mock-to-a-real-system">Switching from mock to a real system</a><a href="#admin-and-observability">Admin and observability</a><a href="#adding-a-new-system">Adding a new system</a><a href="#path-to-production">Path to production</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

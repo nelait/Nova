@@ -143,7 +143,7 @@ route('GET', '/api/outbox', ({ app }) => app.email.list());
 route('GET', '/api/insights', ({ app }) => app.insights());
 route('GET', '/api/audit', ({ app, query }) => app.repos.audit.all().reverse().slice(0, Number(query.get('limit') ?? 200)));
 
-const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
+const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
@@ -173,8 +173,18 @@ export function startServer(app: App, port: number, publicDir: string) {
         }
         return send(res, 404, { error: 'No such route' });
       }
-      const file = normalize(join(publicDir, url.pathname === '/' ? 'index.html' : url.pathname));
-      if (!file.startsWith(publicDir)) return send(res, 403, { error: 'Forbidden' });
+      // The product site and docs (built by npm run site:build) are served under /site/.
+      const isSite = url.pathname === '/site' || url.pathname.startsWith('/site/');
+      if (url.pathname === '/site') {
+        res.writeHead(301, { location: '/site/' });
+        return res.end();
+      }
+      const baseDir = isSite ? join(publicDir, '..', 'site') : publicDir;
+      let rel = isSite ? url.pathname.slice('/site'.length) : url.pathname;
+      if (rel === '/' || rel === '') rel = '/index.html';
+      else if (rel.endsWith('/')) rel += 'index.html';
+      const file = normalize(join(baseDir, decodeURIComponent(rel)));
+      if (!file.startsWith(normalize(baseDir))) return send(res, 403, { error: 'Forbidden' });
       const data = await readFile(file);
       res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });
       res.end(data);
