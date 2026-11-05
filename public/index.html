@@ -612,9 +612,9 @@ function renderWho(user) {
 async function boot() {
   const me = await api('/me');
   state.mode = me.mode;
-  document.body.classList.toggle('sso', me.mode === 'oidc');
+  document.body.classList.toggle('sso', me.mode !== 'dev');
   document.body.classList.toggle('dev-mode', me.mode === 'dev');
-  if (me.mode === 'oidc') { state.user = me.user.id; renderWho(me.user); }
+  if (me.mode !== 'dev') { state.user = me.user.id; renderWho(me.user); }
   await Promise.all([loadUsers(), api('/ai/status').then((s) => (state.ai = s)).catch(() => {})]);
   renderTabs(); render();
 }

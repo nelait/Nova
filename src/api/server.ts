@@ -223,8 +223,22 @@ function cookies(req: IncomingMessage): Record<string, string> {
   return out;
 }
 
-function cookie(name: string, value: string, maxAge: number, secure: boolean): string {
-  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+function cookie(name: string, value: string, maxAge: number, secure: boolean, sameSite: 'Lax' | 'None' = 'Lax'): string {
+  // SameSite=None requires Secure; browsers accept Secure cookies on http://localhost.
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}${secure || sameSite === 'None' ? '; Secure' : ''}`;
+}
+
+/** Reads an application/x-www-form-urlencoded body (the SAML POST binding), capped at 512 KB. */
+async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
+  if (!String(req.headers['content-type'] ?? '').startsWith('application/x-www-form-urlencoded')) throw new AuthError('Expected a form post from the identity provider', 400);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > 512 * 1024) throw new AuthError('Sign-in response is too large', 413);
+    chunks.push(c as Buffer);
+  }
+  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
 /** Small themed HTML page for sign-in outcomes. */
@@ -248,14 +262,37 @@ function checkSameOrigin(req: IncomingMessage): void {
 
 async function handleAuth(app: App, req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   const auth = app.auth;
-  if (auth.mode !== 'oidc') return send(res, 404, { error: 'Single sign-on is not configured' });
+  if (auth.mode === 'dev') return send(res, 404, { error: 'Single sign-on is not configured' });
   const secure = auth.secureCookies;
+  const saml = auth.mode === 'saml';
   if (req.method === 'GET' && url.pathname === '/auth/login') {
     const { url: to, state } = await auth.startLogin(url.searchParams.get('returnTo'));
-    res.writeHead(302, { location: to, 'set-cookie': cookie(LOGIN_COOKIE, state, 600, secure), 'cache-control': 'no-store' });
+    // SAML responses arrive as a cross-site POST, which only carries SameSite=None cookies.
+    res.writeHead(302, { location: to, 'set-cookie': cookie(LOGIN_COOKIE, state, 600, secure, saml ? 'None' : 'Lax'), 'cache-control': 'no-store' });
     return void res.end();
   }
-  if (req.method === 'GET' && url.pathname === '/auth/callback') {
+  if (saml && req.method === 'GET' && url.pathname === '/auth/saml/metadata') {
+    res.writeHead(200, { 'content-type': 'application/samlmetadata+xml; charset=utf-8', 'cache-control': 'no-store' });
+    return void res.end(auth.saml!.metadata());
+  }
+  if (saml && req.method === 'POST' && url.pathname === '/auth/saml/acs') {
+    try {
+      const form = await readForm(req);
+      const { token, returnTo } = await auth.finishSamlLogin(form.get('SAMLResponse'), form.get('RelayState'), cookies(req)[LOGIN_COOKIE]);
+      // 303: follow with a GET. The session cookie is Lax; the redirect is a top-level navigation, so it is sent.
+      res.writeHead(303, {
+        location: returnTo,
+        'set-cookie': [cookie(SESSION_COOKIE, token, auth.sessionSeconds, secure), cookie(LOGIN_COOKIE, '', 0, secure, 'None')],
+        'cache-control': 'no-store',
+      });
+      return void res.end();
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      res.setHeader('set-cookie', cookie(LOGIN_COOKIE, '', 0, secure, 'None'));
+      return page(res, e.status === 403 ? 403 : 400, e.status === 403 ? 'You don’t have access yet' : 'Sign-in failed', e.message, e.status === 403 ? undefined : { href: '/auth/login', label: 'Sign in again' });
+    }
+  }
+  if (!saml && req.method === 'GET' && url.pathname === '/auth/callback') {
     const idpError = url.searchParams.get('error');
     if (idpError) return page(res, 400, 'Sign-in was not completed', `The identity provider reported: ${url.searchParams.get('error_description') ?? idpError}.`, { href: '/auth/login', label: 'Try again' });
     try {
@@ -297,7 +334,7 @@ export function startServer(app: App, port: number, publicDir: string, opts: { h
         // mode (localhost only) the user picked in the UI, sent as x-user-id.
         let me: User | undefined;
         let actor: string;
-        if (app.auth.mode === 'oidc') {
+        if (app.auth.mode !== 'dev') {
           me = app.auth.userFor(cookies(req)[SESSION_COOKIE]);
           if (!me) return send(res, 401, { error: 'Sign in required', signIn: '/auth/login' });
           actor = me.id;
@@ -365,7 +402,7 @@ export function startServer(app: App, port: number, publicDir: string, opts: { h
   server.listen(port, host, () => {
     const addr = server.address();
     const p = typeof addr === 'object' && addr ? addr.port : port;
-    console.log(`Plan Ops Hub on http://${host === '0.0.0.0' ? 'localhost' : host}:${p} (${app.auth.mode === 'oidc' ? 'single sign-on' : 'development mode: no sign-in, localhost only'})`);
+    console.log(`Plan Ops Hub on http://${host === '0.0.0.0' ? 'localhost' : host}:${p} (${app.auth.mode === 'dev' ? 'development mode: no sign-in, localhost only' : `single sign-on (${app.auth.mode.toUpperCase()})`})`);
   });
   return server;
 }

@@ -17,6 +17,7 @@ import { AiAssistService, claudeModelCall, type AiAssist, type ModelCall } from 
 import { AgentRunner, claudeAgentModel, type AgentModel } from './ai/agents.ts';
 import { AuthService, type LoginRequest, type Session } from './auth/auth.ts';
 import { OidcClient, oidcConfigFromEnv } from './auth/oidc.ts';
+import { SamlClient, samlConfigFromEnv, type PendingSamlRequest } from './auth/saml.ts';
 
 export interface AppOptions {
   dbPath?: string; // ':memory:' for tests
@@ -79,10 +80,12 @@ export function createApp(opts: AppOptions = {}) {
   const users = new UserDirectory(usersRepo);
   const cases = new CaseService(repos, kb, executor, integrations, users, clock);
 
-  // Sign-in: single sign-on when OIDC_* is configured, otherwise development mode.
+  // Sign-in: single sign-on when OIDC_* or SAML_* is configured, otherwise development mode.
   const oidcConfig = oidcConfigFromEnv(env);
+  const samlConfig = samlConfigFromEnv(env);
   const auth = new AuthService({
     oidc: oidcConfig ? new OidcClient(oidcConfig, opts.oidcTransport, () => clock.now().getTime()) : undefined,
+    saml: samlConfig ? new SamlClient(samlConfig, new Collection<PendingSamlRequest>(db, 'saml_requests'), () => clock.now().getTime()) : undefined,
     sessions: new Collection<Session>(db, 'sessions'),
     requests: new Collection<LoginRequest>(db, 'login_requests'),
     users,

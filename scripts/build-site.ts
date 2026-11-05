@@ -20,7 +20,7 @@ const PAGES: Page[] = [
   { md: 'INTEGRATIONS.md', slug: 'integrations', group: 'Build processes', blurb: 'Connect the recordkeeper and other systems without adapter code.' },
   { md: 'AGENTS.md', slug: 'agents', group: 'Build processes', blurb: 'AI agents that propose results for people to approve.' },
   { md: 'users-and-routing.md', slug: 'users-and-routing', group: 'Build processes', blurb: 'Skills, levels, SCIM import, and how work is routed.' },
-  { md: 'sign-in.md', slug: 'sign-in', group: 'Operate', blurb: 'Single sign-on with your identity provider, roles and sessions.' },
+  { md: 'sign-in.md', slug: 'sign-in', group: 'Operate', blurb: 'Single sign-on with OpenID Connect or SAML, roles and sessions.' },
   { md: 'deployment.md', slug: 'deployment', group: 'Operate', blurb: 'Settings, and what to put in place before production.' },
   { md: 'api.md', slug: 'api', group: 'Operate', blurb: 'Every HTTP endpoint, with request shapes.' },
   { md: 'ARCHITECTURE.md', slug: 'architecture', group: 'Operate', blurb: 'Components, design decisions and the task state machine.' },

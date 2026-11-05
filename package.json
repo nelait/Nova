@@ -11,6 +11,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",
     "demo:sso": "node --disable-warning=ExperimentalWarning scripts/demo.ts --sso",
+    "demo:saml": "node --disable-warning=ExperimentalWarning scripts/demo.ts --saml",
     "site:build": "node --disable-warning=ExperimentalWarning scripts/build-site.ts",
     "try:agent": "node --disable-warning=ExperimentalWarning scripts/try-fund-mapping-agent.ts",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
@@ -23,6 +24,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.5.0",
+    "@node-saml/node-saml": "5.1.0",
+    "@xmldom/xmldom": "0.8.15",
+    "xml-crypto": "6.4.0",
     "zod": "^4.6.7"
   }
 }

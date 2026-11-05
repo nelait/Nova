@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Sign-in and single sign-on · Plan Ops Hub docs</title>
-<meta name="description" content="Single sign-on with your identity provider, roles and sessions." />
+<meta name="description" content="Single sign-on with OpenID Connect or SAML, roles and sessions." />
 <meta name="claude:viewport-fit-sides" content="cover" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
@@ -32,11 +32,13 @@
   </details></nav>
   <article class="doc">
 <h1>Sign-in and single sign-on</h1>
-<p>Plan Ops Hub signs people in through your organization&#39;s identity provider
-using OpenID Connect (OIDC). It works with Okta, Microsoft Entra ID, Google
-Workspace, Ping, Auth0 and any other standard OIDC provider. Plan Ops Hub never
-sees or stores passwords.</p>
-<p>There are two modes:</p>
+<p>Plan Ops Hub signs people in through your organization&#39;s identity provider,
+with <strong>OpenID Connect (OIDC)</strong> or <strong>SAML 2.0</strong>. OIDC works with Okta, Microsoft
+Entra ID, Google Workspace, Ping, Auth0 and other standard providers. SAML covers
+providers or setups that only offer it, such as ADFS and Shibboleth, or an
+existing SAML app in Okta, Entra ID or Ping. Plan Ops Hub never sees or stores
+passwords.</p>
+<p>There are three modes:</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -46,20 +48,30 @@ sees or stores passwords.</p>
 </tr>
 </thead>
 <tbody><tr>
-<td><strong>Single sign-on</strong></td>
+<td><strong>Single sign-on, OIDC</strong></td>
 <td><code>OIDC_ISSUER</code> is set</td>
 <td>The person who signed in at your identity provider. Sessions last 8 hours.</td>
 </tr>
 <tr>
+<td><strong>Single sign-on, SAML</strong></td>
+<td><code>SAML_IDP_SSO_URL</code> is set</td>
+<td>The same, through SAML.</td>
+</tr>
+<tr>
 <td><strong>Development</strong></td>
-<td>No <code>OIDC_*</code> settings</td>
+<td>Neither</td>
 <td>Whoever you pick in <strong>Working as</strong>. Anyone can act as anyone, so the server only listens on <code>127.0.0.1</code> (this computer) and refuses to start on a network address.</td>
 </tr>
 </tbody></table></div>
+<p>Configure one of OIDC or SAML, not both; the server refuses to start with both.
+<strong>Prefer OIDC when your provider offers it</strong>: it is simpler to set up and has
+fewer ways to go wrong. Everything after sign-in (who may sign in, roles,
+sessions, sign-out) works the same either way.</p>
 <h2 id="try-it-locally">Try it locally</h2>
-<pre><code class="language-bash">npm run demo:sso
+<pre><code class="language-bash">npm run demo:sso     # OpenID Connect
+npm run demo:saml    # SAML 2.0
 </code></pre>
-<p>This starts the demo with a <strong>mock identity provider</strong> on port 3201. Open
+<p>Each starts the demo with a <strong>mock identity provider</strong> (port 3201 for OIDC, 3202 for SAML). Open
 <a href="http://localhost:3000">http://localhost:3000</a>. You are sent to the provider&#39;s page, where you pick who
 to sign in as. Try:</p>
 <ul>
@@ -68,9 +80,10 @@ to sign in as. Try:</p>
 <li><strong>Olivia Grant</strong>: an auditor, who can see everything, including the audit log, but change nothing.</li>
 <li><strong>Someone not yet provisioned</strong>: signs in at the provider but is refused by Plan Ops Hub, because they aren&#39;t in the user directory.</li>
 </ul>
-<p>The mock provider signs real tokens and checks PKCE, so this exercises the same
-code as production. Never use it outside development.</p>
-<h2 id="set-up-your-identity-provider">Set up your identity provider</h2>
+<p>The mock providers sign real tokens and assertions (and the OIDC one checks
+PKCE), so this exercises the same code as production. Never use them outside
+development.</p>
+<h2 id="set-up-openid-connect">Set up OpenID Connect</h2>
 <ol>
 <li><strong>Register an application</strong> in your provider: type <em>Web application</em>, sign-in method <em>OIDC</em>, grant type <em>Authorization Code</em>. PKCE is always used.</li>
 <li><strong>Sign-in redirect URI:</strong> <code>https://&lt;your Plan Ops Hub address&gt;/auth/callback</code>.</li>
@@ -135,6 +148,79 @@ code as production. Never use it outside development.</p>
 </tbody></table></div>
 <p>Run Plan Ops Hub behind a TLS-terminating proxy or load balancer so people reach
 it over <code>https</code>.</p>
+<h2 id="set-up-saml">Set up SAML</h2>
+<ol>
+<li><strong>Create a SAML application</strong> in your identity provider. Most providers can read Plan Ops Hub&#39;s service provider metadata: start Plan Ops Hub with the settings below and give the provider <code>https://&lt;your address&gt;/auth/saml/metadata</code>. Otherwise enter:<ul>
+<li><strong>Assertion Consumer Service (ACS) URL / Reply URL:</strong> <code>https://&lt;your address&gt;/auth/saml/acs</code> (HTTP-POST binding)</li>
+<li><strong>Entity ID / Audience / Identifier:</strong> <code>https://&lt;your address&gt;/auth/saml/metadata</code>, or your own value in <code>SAML_SP_ENTITY_ID</code></li>
+<li><strong>NameID format:</strong> email address</li>
+</ul>
+</li>
+<li><strong>Sign the assertion</strong> with SHA-256 (the usual default). Signing the whole response as well is fine.</li>
+<li><strong>Send the user&#39;s email</strong>, as the NameID or in an attribute. Plan Ops Hub reads <code>email</code>, <code>mail</code>, the standard Microsoft <code>emailaddress</code> claim and <code>urn:oid:0.9.2342.19200300.100.1.3</code> automatically, then a NameID that is an email. To use another attribute, set <code>SAML_USER_ATTRIBUTE</code>.</li>
+<li>From the provider&#39;s metadata or setup page, note the <strong>SSO URL</strong> (HTTP-Redirect binding), the <strong>IdP entity ID / issuer</strong>, and download the <strong>signing certificate</strong>.<ul>
+<li>Entra ID: <em>Login URL</em>, <em>Microsoft Entra Identifier</em>, <em>Certificate (Base64)</em></li>
+<li>Okta: <em>Identity Provider Single Sign-On URL</em>, <em>Identity Provider Issuer</em>, <em>X.509 Certificate</em></li>
+<li>ADFS: <code>https://&lt;adfs&gt;/adfs/ls/</code>, <code>http://&lt;adfs&gt;/adfs/services/trust</code>, the token-signing certificate</li>
+</ul>
+</li>
+<li>Assign the application to the people who should use Plan Ops Hub.</li>
+</ol>
+<p>Then set these environment variables and restart:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SAML_IDP_SSO_URL</code></td>
+<td>yes</td>
+<td>The provider&#39;s single sign-on URL. Must be <code>https</code> (plain <code>http</code> only for <code>localhost</code>).</td>
+</tr>
+<tr>
+<td><code>SAML_IDP_ENTITY_ID</code></td>
+<td>yes</td>
+<td>The provider&#39;s entity ID. Assertions from any other issuer are refused.</td>
+</tr>
+<tr>
+<td><code>SAML_IDP_CERT</code></td>
+<td>yes</td>
+<td>The provider&#39;s signing certificate, PEM or base64 (newlines may be written as <code>\n</code>).</td>
+</tr>
+<tr>
+<td><code>SAML_IDP_CERT_2</code></td>
+<td>no</td>
+<td>A second certificate, for rollover: set the new one here before the provider switches, then move it to <code>SAML_IDP_CERT</code>.</td>
+</tr>
+<tr>
+<td><code>SAML_ACS_URL</code></td>
+<td>yes</td>
+<td><code>https://&lt;your address&gt;/auth/saml/acs</code>, exactly as registered.</td>
+</tr>
+<tr>
+<td><code>SAML_SP_ENTITY_ID</code></td>
+<td>no</td>
+<td>This app&#39;s entity ID. Default: <code>&lt;your address&gt;/auth/saml/metadata</code>.</td>
+</tr>
+<tr>
+<td><code>SAML_USER_ATTRIBUTE</code></td>
+<td>no</td>
+<td>Attribute holding the email, if not one of the usual ones.</td>
+</tr>
+<tr>
+<td><code>SAML_WANT_RESPONSE_SIGNED</code></td>
+<td>no</td>
+<td><code>true</code> to also require the whole response to be signed. Default: only the assertion must be signed.</td>
+</tr>
+</tbody></table></div>
+<p>Only sign-ins started from Plan Ops Hub are accepted. Starting from the
+provider&#39;s app dashboard (IdP-initiated sign-in) is refused, because an
+unsolicited assertion can&#39;t be tied to the browser that receives it. Set the
+dashboard tile to open <code>https://&lt;your address&gt;/auth/login</code> instead (Okta and
+Entra ID call this a <em>bookmark</em> or <em>sign-on URL</em>).</p>
 <h2 id="who-can-sign-in">Who can sign in</h2>
 <p>Signing in at the identity provider isn&#39;t enough: the person must also be an
 <strong>active user in Plan Ops Hub</strong>, matched by email (not case-sensitive). That&#39;s
@@ -184,6 +270,7 @@ demo-only <em>Simulate TRAC outage</em> button doesn&#39;t exist with single sig
 <ul>
 <li><strong>Authorization code flow with PKCE</strong>, <code>state</code> bound to the browser by a short-lived cookie, and a <code>nonce</code> in the ID token, so a stolen or replayed sign-in link can&#39;t log someone in.</li>
 <li><strong>ID tokens are fully verified:</strong> signature against the provider&#39;s published keys (RS256/384/512, PS256, ES256/384; <code>none</code> and unknown keys are rejected), issuer, audience, expiry and nonce. Key rotation is picked up automatically.</li>
+<li><strong>SAML assertions are verified by <a href="https://github.com/node-saml/node-saml">node-saml</a></strong>, the library behind passport-saml, rather than hand-written XML signature code, which is a classic source of signature-wrapping bugs. The assertion must be signed by the configured certificate (SHA-256), issued by the configured IdP entity ID, addressed to this app (audience, Recipient and Destination), unexpired, and in response to a request this browser made in the last 10 minutes. Each response is accepted once. Tests cover tampered, unsigned, re-signed, wrapped, replayed, misaddressed and unsolicited assertions.</li>
 <li><strong>Sessions are server-side.</strong> The browser holds a random token in an <code>HttpOnly</code>, <code>SameSite=Lax</code> cookie; the database stores only its SHA-256 hash.</li>
 <li><strong>Cross-site requests are refused:</strong> requests that change data must be JSON, and their <code>Origin</code> must be this site.</li>
 <li>After sign-in you return only to a page on this site.</li>
@@ -222,6 +309,26 @@ be immediate.</p>
 <td><code>OIDC_CLIENT_ID</code> is the ID of this application, not another one.</td>
 </tr>
 <tr>
+<td><em>SAML response was rejected: Invalid signature</em></td>
+<td><code>SAML_IDP_CERT</code> is the provider&#39;s current signing certificate. During rollover, set both certificates.</td>
+</tr>
+<tr>
+<td><em>SAML assertion audience mismatch</em></td>
+<td>The entity ID registered at the provider equals <code>SAML_SP_ENTITY_ID</code> (default <code>&lt;your address&gt;/auth/saml/metadata</code>).</td>
+</tr>
+<tr>
+<td><em>…issued by …, not the configured identity provider</em></td>
+<td><code>SAML_IDP_ENTITY_ID</code> matches the provider&#39;s issuer exactly.</td>
+</tr>
+<tr>
+<td><em>InResponseTo is missing</em> or <em>…not valid</em> after clicking the app tile</td>
+<td>IdP-initiated sign-in isn&#39;t supported. Point the tile at <code>/auth/login</code>.</td>
+</tr>
+<tr>
+<td><em>The SAML assertion has no email attribute</em></td>
+<td>Send the email as the NameID or an attribute, or set <code>SAML_USER_ATTRIBUTE</code>.</td>
+</tr>
+<tr>
 <td><em>Development mode (no sign-in) only listens on localhost</em></td>
 <td>Configure single sign-on before serving on a network.</td>
 </tr>
@@ -232,7 +339,7 @@ be immediate.</p>
       <a href="deployment.html" style="text-align:right"><small>Next</small>Deployment</a>
     </nav>
   </article>
-  <aside class="toc"><b>On this page</b><a href="#try-it-locally">Try it locally</a><a href="#set-up-your-identity-provider">Set up your identity provider</a><a href="#who-can-sign-in">Who can sign in</a><a href="#roles">Roles</a><a href="#how-it39s-protected">How it&amp;#39;s protected</a><a href="#signing-out">Signing out</a><a href="#troubleshooting">Troubleshooting</a></aside>
+  <aside class="toc"><b>On this page</b><a href="#try-it-locally">Try it locally</a><a href="#set-up-openid-connect">Set up OpenID Connect</a><a href="#set-up-saml">Set up SAML</a><a href="#who-can-sign-in">Who can sign in</a><a href="#roles">Roles</a><a href="#how-it39s-protected">How it&amp;#39;s protected</a><a href="#signing-out">Signing out</a><a href="#troubleshooting">Troubleshooting</a></aside>
 </div>
 <script>
   (function () {

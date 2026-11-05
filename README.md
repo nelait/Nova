@@ -104,12 +104,14 @@ written to disk.
 ### Single sign-on
 
 ```bash
-npm run demo:sso     # demo plus a mock identity provider on :3201
+npm run demo:sso     # demo plus a mock OpenID Connect provider on :3201
+npm run demo:saml    # demo plus a mock SAML 2.0 provider on :3202
 ```
 
 In production, set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` (and
 `OIDC_CLIENT_SECRET`) to sign people in through Okta, Entra ID, Google or any
-OIDC provider. Users must exist and be active in the directory; the `role:admin`
+OIDC provider, or `SAML_IDP_SSO_URL`, `SAML_IDP_ENTITY_ID`, `SAML_IDP_CERT` and
+`SAML_ACS_URL` for SAML 2.0 (ADFS, Shibboleth, or a SAML app in Okta or Entra ID). Users must exist and be active in the directory; the `role:admin`
 group grants admin actions. Without these settings the app runs in development
 mode (pick a user, no sign-in) and only listens on localhost. See
 [docs/sign-in.md](docs/sign-in.md).

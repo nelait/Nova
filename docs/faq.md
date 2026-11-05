@@ -26,8 +26,9 @@ its own templates or rule sets) without forking the standard process. See
 [Process definitions](playbooks.md#per-client-variations).
 
 **How do people sign in?**
-Through your identity provider with OpenID Connect (Okta, Entra ID, Google
-Workspace, Ping, Auth0). Plan Ops Hub never handles passwords, and people must
+Through your identity provider, with OpenID Connect (Okta, Entra ID, Google
+Workspace, Ping, Auth0) or SAML 2.0 (ADFS, Shibboleth, or SAML apps in those
+providers). Plan Ops Hub never handles passwords, and people must
 also be active users in its directory. See [Sign-in](sign-in.md).
 
 **Can our internal audit or compliance reviewers look without changing anything?**

@@ -52,8 +52,9 @@ Each client can have a variant of any process (extra steps, different automation
 its own templates or rule sets) without forking the standard process. See
 <a href="playbooks.html#per-client-variations">Process definitions</a>.</p>
 <p><strong>How do people sign in?</strong>
-Through your identity provider with OpenID Connect (Okta, Entra ID, Google
-Workspace, Ping, Auth0). Plan Ops Hub never handles passwords, and people must
+Through your identity provider, with OpenID Connect (Okta, Entra ID, Google
+Workspace, Ping, Auth0) or SAML 2.0 (ADFS, Shibboleth, or SAML apps in those
+providers). Plan Ops Hub never handles passwords, and people must
 also be active users in its directory. See <a href="sign-in.html">Sign-in</a>.</p>
 <p><strong>Can our internal audit or compliance reviewers look without changing anything?</strong>
 Yes. Give them the <code>role:auditor</code> group. Auditors see every case, its audit

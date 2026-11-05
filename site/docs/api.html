@@ -34,7 +34,7 @@
 <h1>API reference</h1>
 <p>JSON over HTTP. Requests that change data must send <code>content-type: application/json</code>
 from this site&#39;s own origin.</p>
-<p><strong>Who is calling.</strong> With <a href="sign-in.html">single sign-on</a>, the session cookie set at
+<p><strong>Who is calling.</strong> With <a href="sign-in.html">single sign-on</a> (OIDC or SAML), the session cookie set at
 sign-in identifies the user; without one the API returns 401
 <code>{ &quot;error&quot;: &quot;Sign in required&quot;, &quot;signIn&quot;: &quot;/auth/login&quot; }</code>. In development mode
 (localhost only) the acting user is the <code>x-user-id</code> header. Routes marked
@@ -60,7 +60,17 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>GET</td>
 <td><code>/auth/callback</code></td>
-<td>The provider returns here; sets the session cookie</td>
+<td>OIDC: the provider returns here; sets the session cookie</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/auth/saml/acs</code></td>
+<td>SAML: the provider posts the response here; sets the session cookie</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/auth/saml/metadata</code></td>
+<td>SAML: this app&#39;s service provider metadata</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -70,7 +80,7 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>GET</td>
 <td><code>/api/me</code></td>
-<td><code>{ mode: &quot;oidc&quot; | &quot;dev&quot;, user }</code></td>
+<td><code>{ mode: &quot;oidc&quot; | &quot;saml&quot; | &quot;dev&quot;, user }</code></td>
 </tr>
 </tbody></table></div>
 <h2 id="requests-and-cases">Requests and cases</h2>

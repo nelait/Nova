@@ -3,7 +3,7 @@
 JSON over HTTP. Requests that change data must send `content-type: application/json`
 from this site's own origin.
 
-**Who is calling.** With [single sign-on](sign-in.md), the session cookie set at
+**Who is calling.** With [single sign-on](sign-in.md) (OIDC or SAML), the session cookie set at
 sign-in identifies the user; without one the API returns 401
 `{ "error": "Sign in required", "signIn": "/auth/login" }`. In development mode
 (localhost only) the acting user is the `x-user-id` header. Routes marked
@@ -19,9 +19,11 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/auth/login?returnTo=/path` | Redirects to the identity provider |
-| GET | `/auth/callback` | The provider returns here; sets the session cookie |
+| GET | `/auth/callback` | OIDC: the provider returns here; sets the session cookie |
+| POST | `/auth/saml/acs` | SAML: the provider posts the response here; sets the session cookie |
+| GET | `/auth/saml/metadata` | SAML: this app's service provider metadata |
 | POST | `/auth/logout` | Ends the session |
-| GET | `/api/me` | `{ mode: "oidc" \| "dev", user }` |
+| GET | `/api/me` | `{ mode: "oidc" \| "saml" \| "dev", user }` |
 
 ## Requests and cases
 
