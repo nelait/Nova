@@ -20,6 +20,7 @@ interface PendingCode {
   nonce: string;
   challenge: string;
   person: MockPerson;
+  sid: string;
   expires: number;
 }
 
@@ -32,6 +33,10 @@ export class MockIdp {
   private codes = new Map<string, PendingCode>();
   /** Lets tests tamper with the next ID token's claims (wrong audience, expired, ...). */
   claimOverrides: Record<string, unknown> = {};
+  /** Signed-in sessions at this provider: sid -> person. */
+  readonly sessions = new Map<string, MockPerson>();
+  /** The app's back-channel logout URL, for "sign out everywhere" on the demo page. */
+  backchannelLogoutUri?: string;
 
   constructor(opts: { issuer: string; clientId: string; people: MockPerson[] }) {
     this.issuer = opts.issuer;
@@ -53,7 +58,10 @@ export class MockIdp {
     if (q.get('response_type') !== 'code' || q.get('code_challenge_method') !== 'S256') throw new Error('unsupported request');
     const person = this.people.find((p) => p.email === email) ?? { email, name: email };
     const code = randomBytes(16).toString('base64url');
+    const sid = randomBytes(12).toString('base64url');
+    this.sessions.set(sid, person);
     this.codes.set(code, {
+      sid,
       clientId: this.clientId,
       redirectUri: q.get('redirect_uri')!,
       nonce: q.get('nonce')!,
@@ -68,11 +76,40 @@ export class MockIdp {
   }
 
   /** Signs an ID token (exported so tests can forge bad ones). */
-  idToken(claims: Record<string, unknown>, key: KeyObject = this.privateKey, kid = 'mock-1'): string {
+  idToken(claims: Record<string, unknown>, key: KeyObject = this.privateKey, kid = 'mock-1', typ = 'JWT'): string {
     const enc = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
-    const head = enc({ alg: 'RS256', typ: 'JWT', kid });
+    const head = enc({ alg: 'RS256', typ, kid });
     const body = enc(claims);
     return `${head}.${body}.${sign('sha256', Buffer.from(`${head}.${body}`), key).toString('base64url')}`;
+  }
+
+  /** A back-channel logout token for a session (sid) and/or user (sub). */
+  logoutToken(o: { sid?: string; sub?: string; extra?: Record<string, unknown>; key?: KeyObject } = {}): string {
+    const now = Math.floor(Date.now() / 1000);
+    const claims: Record<string, unknown> = {
+      iss: this.issuer,
+      aud: this.clientId,
+      iat: now,
+      exp: now + 120,
+      jti: randomBytes(12).toString('hex'),
+      events: { 'http://schemas.openid.net/event/backchannel-logout': {} },
+      ...(o.sid ? { sid: o.sid } : {}),
+      ...(o.sub ? { sub: o.sub } : {}),
+      ...o.extra,
+    };
+    return this.idToken(claims, o.key, 'mock-1', 'logout+jwt');
+  }
+
+  /** The provider's end-session step: forgets the session and returns where to send the browser. */
+  endSession(endSessionUrl: string): string {
+    const q = new URL(endSessionUrl).searchParams;
+    if (q.get('client_id') !== this.clientId) throw new Error('unknown client_id');
+    const hint = q.get('id_token_hint');
+    if (hint) {
+      const claims = JSON.parse(Buffer.from(hint.split('.')[1], 'base64url').toString('utf8')) as { sid?: string };
+      if (claims.sid) this.sessions.delete(claims.sid);
+    }
+    return q.get('post_logout_redirect_uri') ?? '/';
   }
 
   /** Transport for the app's OIDC client: discovery, JWKS and token endpoints. */
@@ -85,6 +122,9 @@ export class MockIdp {
         authorization_endpoint: `${this.issuer}/authorize`,
         token_endpoint: `${this.issuer}/token`,
         jwks_uri: `${this.issuer}/jwks`,
+        end_session_endpoint: `${this.issuer}/logout`,
+        backchannel_logout_supported: true,
+        backchannel_logout_session_supported: true,
       });
     }
     if (path.endsWith('/jwks')) return json(200, { keys: [this.jwk] });
@@ -101,6 +141,7 @@ export class MockIdp {
         iss: this.issuer,
         aud: this.clientId,
         sub: `mock|${pending.person.email}`,
+        sid: pending.sid,
         email: pending.person.email,
         email_verified: pending.person.emailVerified ?? true,
         name: pending.person.name,
@@ -119,6 +160,37 @@ export class MockIdp {
     const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
     const server = createServer(async (req, res) => {
       const url = new URL(req.url ?? '/', this.issuer);
+      if (url.pathname === '/logout') {
+        try {
+          res.writeHead(302, { location: this.endSession(url.toString()) });
+        } catch (e) {
+          res.writeHead(400, { 'content-type': 'text/plain' });
+          return void res.end(String((e as Error).message));
+        }
+        return void res.end();
+      }
+      if (url.pathname === '/end-session' && url.searchParams.get('sid') && this.backchannelLogoutUri) {
+        // "Sign out everywhere": what an admin revoking a session, or the user signing
+        // out of another app, looks like to Plan Ops Hub.
+        const sid = url.searchParams.get('sid')!;
+        const person = this.sessions.get(sid);
+        this.sessions.delete(sid);
+        await fetch(this.backchannelLogoutUri, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ logout_token: this.logoutToken({ sid, sub: person ? `mock|${person.email}` : undefined }) }).toString(),
+        }).catch(() => undefined);
+        res.writeHead(302, { location: '/sessions' });
+        return void res.end();
+      }
+      if (url.pathname === '/sessions') {
+        const esc2 = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        return void res.end(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock identity provider sessions</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32em;margin:40px auto;padding:0 16px;background:#f4f1ea;color:#1d2321}a{color:#1f5f4f}li{margin:8px 0}</style>
+<h1>Signed-in sessions</h1><p>Signing a session out here notifies Plan Ops Hub by back-channel logout, as when an administrator revokes a session.</p>
+<ul>${[...this.sessions].map(([sid, p]) => `<li><b>${esc2(p.name)}</b> ${esc2(p.email)} · <a href="/end-session?sid=${encodeURIComponent(sid)}">Sign out everywhere</a></li>`).join('') || '<li>None</li>'}</ul>`);
+      }
       if (url.pathname === '/authorize') {
         const as = url.searchParams.get('login_as');
         if (as) {

@@ -22,7 +22,9 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 | GET | `/auth/callback` | OIDC: the provider returns here; sets the session cookie |
 | POST | `/auth/saml/acs` | SAML: the provider posts the response here; sets the session cookie |
 | GET | `/auth/saml/metadata` | SAML: this app's service provider metadata |
-| POST | `/auth/logout` | Ends the session |
+| POST | `/auth/logout` | Ends the session; returns `{ redirect }`: the provider's logout (single logout) or `/auth/signed-out` |
+| POST | `/auth/oidc/backchannel-logout` | OIDC back-channel logout, called by the provider: form field `logout_token` |
+| GET / POST | `/auth/saml/slo` | SAML single logout: LogoutRequests from the provider, LogoutResponses to ours |
 | GET | `/api/me` | `{ mode: "oidc" \| "saml" \| "dev", user }` |
 
 ## Requests and cases

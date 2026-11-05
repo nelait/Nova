@@ -3,7 +3,7 @@ import type { User } from '../domain/types.ts';
 import type { Collection } from '../store/db.ts';
 import type { UserDirectory } from '../users/userDirectory.ts';
 import { AuthError, OidcClient, randomToken } from './oidc.ts';
-import type { SamlClient } from './saml.ts';
+import type { SamlClient, SamlSessionRef } from './saml.ts';
 
 /** Server-side session. The id is a hash of the cookie token, so a database leak doesn't expose live sessions. */
 export interface Session {
@@ -11,6 +11,18 @@ export interface Session {
   userId: string;
   createdAt: string;
   expiresAt: string;
+  /**
+   * The provider's session, for single logout. OIDC: the ID token (sent back as
+   * id_token_hint), sub and sid. SAML: NameID and SessionIndex. Server-side only.
+   */
+  oidc?: { idToken: string; sub?: string; sid?: string };
+  saml?: SamlSessionRef;
+}
+
+/** A back-channel logout token's jti, kept to refuse replays. */
+export interface SeenToken {
+  id: string;
+  at: string;
 }
 
 /** A sign-in in progress, keyed by the OAuth `state`. Lives for 10 minutes. */
@@ -38,6 +50,7 @@ export class AuthService {
   readonly saml?: SamlClient;
   private sessions: Collection<Session>;
   private requests: Collection<LoginRequest>;
+  private seenTokens: Collection<SeenToken>;
   private users: UserDirectory;
   private audit: (actor: string, entityId: string, event: string, detail?: unknown) => void;
   private now: () => Date;
@@ -48,6 +61,7 @@ export class AuthService {
     saml?: SamlClient;
     sessions: Collection<Session>;
     requests: Collection<LoginRequest>;
+    seenTokens: Collection<SeenToken>;
     users: UserDirectory;
     audit: (actor: string, entityId: string, event: string, detail?: unknown) => void;
     now: () => Date;
@@ -59,6 +73,7 @@ export class AuthService {
     this.saml = opts.saml;
     this.sessions = opts.sessions;
     this.requests = opts.requests;
+    this.seenTokens = opts.seenTokens;
     this.users = opts.users;
     this.audit = opts.audit;
     this.now = opts.now;
@@ -98,7 +113,7 @@ export class AuthService {
   }
 
   /** Map the identity the provider vouched for to an active directory user and open a session. */
-  private openSession(value: string, by: 'email' | 'id', via: AuthMode, returnTo: string): { token: string; returnTo: string; user: User } {
+  private openSession(value: string, by: 'email' | 'id', via: AuthMode, returnTo: string, idp: Pick<Session, 'oidc' | 'saml'>): { token: string; returnTo: string; user: User } {
     const user = by === 'email' ? this.users.byEmail(value) : this.users.list().find((u) => u.id === value);
     if (!user || !user.active) {
       this.audit('auth', value, 'user.sign-in-refused', { reason: user ? 'inactive' : 'not provisioned', via });
@@ -106,7 +121,7 @@ export class AuthService {
     }
     const token = randomToken();
     const createdAt = this.now();
-    this.sessions.insert({ id: hash(token), userId: user.id, createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + this.ttlMs).toISOString() });
+    this.sessions.insert({ id: hash(token), userId: user.id, createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + this.ttlMs).toISOString(), ...idp });
     this.audit(user.id, user.id, 'user.signed-in', { via });
     return { token, returnTo, user };
   }
@@ -116,8 +131,8 @@ export class AuthService {
     if (!this.saml) throw new AuthError('SAML sign-in is not configured', 404);
     if (typeof samlResponse !== 'string' || !samlResponse) throw new AuthError('Sign-in response is missing its SAMLResponse', 400);
     const req = this.takeRequest(relayState, browserState);
-    const { email } = await this.saml.verify(samlResponse);
-    return this.openSession(email, 'email', 'saml', req.returnTo);
+    const { email, ref } = await this.saml.verify(samlResponse);
+    return this.openSession(email, 'email', 'saml', req.returnTo, { saml: ref });
   }
 
   /**
@@ -129,12 +144,13 @@ export class AuthService {
     if (typeof code !== 'string' || !code) throw new AuthError('Sign-in response is missing its code', 400);
     const req = this.takeRequest(state, browserState);
 
-    const claims = await this.oidc.exchange(code, req.verifier, req.nonce);
+    const { claims, idToken } = await this.oidc.exchange(code, req.verifier, req.nonce);
     const claim = this.oidc.config.userClaim;
     const value = claims[claim];
     if (typeof value !== 'string' || !value) throw new AuthError(`The identity provider did not send the "${claim}" claim`, 403);
     if (claim === 'email' && claims.email_verified === false) throw new AuthError('Your email address is not verified with the identity provider', 403);
-    return this.openSession(value, claim === 'email' ? 'email' : 'id', 'oidc', req.returnTo);
+    const oidc = { idToken, sub: typeof claims.sub === 'string' ? claims.sub : undefined, sid: typeof claims.sid === 'string' ? claims.sid : undefined };
+    return this.openSession(value, claim === 'email' ? 'email' : 'id', 'oidc', req.returnTo, { oidc });
   }
 
   /** The signed-in user for a session cookie, or undefined. Deactivated users lose access at once. */
@@ -150,13 +166,70 @@ export class AuthService {
     return u?.active ? u : undefined;
   }
 
-  logout(token: string | undefined): void {
-    if (!token) return;
-    const s = this.sessions.get(hash(token));
-    if (s) {
-      this.sessions.delete(s.id);
-      this.audit(s.userId, s.userId, 'user.signed-out');
+  /** Whether signing out here also signs out at the identity provider. */
+  async providerLogout(): Promise<boolean> {
+    if (this.oidc) return this.oidc.providerLogoutAvailable().catch(() => false);
+    return !!this.saml?.singleLogout;
+  }
+
+  /**
+   * Sign out. The local session always ends first, so this browser is signed out
+   * even if the provider is unreachable. Returns where to send the browser: the
+   * provider's logout (single logout), or the signed-out page.
+   */
+  async logout(token: string | undefined): Promise<string> {
+    const s = token ? this.sessions.get(hash(token)) : undefined;
+    if (!s) return '/auth/signed-out';
+    this.sessions.delete(s.id);
+    let to: string | undefined;
+    try {
+      if (this.oidc && s.oidc) to = await this.oidc.logoutUrl(s.oidc.idToken);
+      if (this.saml && s.saml) to = await this.saml.logoutUrl(s.saml);
+    } catch {
+      to = undefined; // provider metadata unreachable: local sign-out still stands
     }
+    this.audit(s.userId, s.userId, 'user.signed-out', { via: 'user', provider: !!to });
+    return to ?? '/auth/signed-out';
+  }
+
+  /** End every local session the provider says has ended. */
+  private endSessions(match: (s: Session) => boolean, via: string): number {
+    const ended = this.sessions.find(match);
+    for (const s of ended) {
+      this.sessions.delete(s.id);
+      this.audit('auth', s.userId, 'user.signed-out', { via });
+    }
+    return ended.length;
+  }
+
+  /**
+   * OIDC back-channel logout: the provider tells us, server to server, that a
+   * session ended (the user signed out elsewhere, or an admin revoked it).
+   */
+  async backchannelLogout(logoutToken: unknown): Promise<number> {
+    if (!this.oidc) throw new AuthError('OpenID Connect sign-in is not configured', 404);
+    if (typeof logoutToken !== 'string' || !logoutToken) throw new AuthError('Missing logout_token', 400);
+    const t = await this.oidc.verifyLogoutToken(logoutToken);
+    const cutoff = new Date(this.now().getTime() - 3_600_000).toISOString();
+    for (const old of this.seenTokens.find((x) => x.at < cutoff)) this.seenTokens.delete(old.id);
+    if (this.seenTokens.get(t.jti)) throw new AuthError('This logout token was already used', 400);
+    this.seenTokens.insert({ id: t.jti, at: this.now().toISOString() });
+    // A sid ends that one session; a sub alone ends all of that user's sessions.
+    return this.endSessions((s) => !!s.oidc && (t.sid ? s.oidc.sid === t.sid && (!t.sub || s.oidc.sub === t.sub) : s.oidc.sub === t.sub), 'idp-backchannel');
+  }
+
+  /**
+   * SAML front-channel single logout at /auth/saml/slo. A LogoutRequest from the
+   * provider ends the matching sessions and returns the LogoutResponse redirect;
+   * a LogoutResponse (to our own request) returns the signed-out page.
+   */
+  async samlSlo(method: 'GET' | 'POST', params: URLSearchParams, rawQuery: string): Promise<{ redirect: string; confirmed: boolean }> {
+    if (!this.saml) throw new AuthError('SAML sign-in is not configured', 404);
+    const msg = await this.saml.handleSlo(method, params, rawQuery);
+    if (msg.kind === 'response') return { redirect: '/auth/signed-out', confirmed: msg.ok };
+    const { ref } = msg;
+    this.endSessions((s) => !!s.saml && s.saml.nameID === ref.nameID && (!ref.sessionIndex || s.saml.sessionIndex === ref.sessionIndex), 'idp-slo');
+    return { redirect: await this.saml.logoutResponseUrl(msg.reply, msg.relayState), confirmed: true };
   }
 
   private purge(): void {

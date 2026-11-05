@@ -271,15 +271,105 @@ demo-only <em>Simulate TRAC outage</em> button doesn&#39;t exist with single sig
 <li><strong>Authorization code flow with PKCE</strong>, <code>state</code> bound to the browser by a short-lived cookie, and a <code>nonce</code> in the ID token, so a stolen or replayed sign-in link can&#39;t log someone in.</li>
 <li><strong>ID tokens are fully verified:</strong> signature against the provider&#39;s published keys (RS256/384/512, PS256, ES256/384; <code>none</code> and unknown keys are rejected), issuer, audience, expiry and nonce. Key rotation is picked up automatically.</li>
 <li><strong>SAML assertions are verified by <a href="https://github.com/node-saml/node-saml">node-saml</a></strong>, the library behind passport-saml, rather than hand-written XML signature code, which is a classic source of signature-wrapping bugs. The assertion must be signed by the configured certificate (SHA-256), issued by the configured IdP entity ID, addressed to this app (audience, Recipient and Destination), unexpired, and in response to a request this browser made in the last 10 minutes. Each response is accepted once. Tests cover tampered, unsigned, re-signed, wrapped, replayed, misaddressed and unsolicited assertions.</li>
+<li><strong>Single logout</strong> messages from the provider are verified as strictly as sign-ins; see <a href="#what-protects-logout">What protects logout</a>.</li>
 <li><strong>Sessions are server-side.</strong> The browser holds a random token in an <code>HttpOnly</code>, <code>SameSite=Lax</code> cookie; the database stores only its SHA-256 hash.</li>
 <li><strong>Cross-site requests are refused:</strong> requests that change data must be JSON, and their <code>Origin</code> must be this site.</li>
 <li>After sign-in you return only to a page on this site.</li>
 <li>With single sign-on, the <code>x-user-id</code> header is ignored.</li>
 </ul>
-<h2 id="signing-out">Signing out</h2>
-<p><strong>Sign out</strong> (under your name in the sidebar) ends the Plan Ops Hub session.
-You may still be signed in at your identity provider, so the next sign-in can
-be immediate.</p>
+<h2 id="signing-out-and-single-logout">Signing out and single logout</h2>
+<p><strong>Sign out</strong> (under your name in the sidebar) always ends the Plan Ops Hub
+session first, so this browser is signed out even if the identity provider can&#39;t
+be reached. With single logout set up, it works in both directions:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th>OpenID Connect</th>
+<th>SAML</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Signing out here also signs you out at the provider</strong></td>
+<td>On by default when the provider publishes an <code>end_session_endpoint</code> (Okta, Entra ID, Auth0, Ping and most others; Google doesn&#39;t). The browser goes to the provider with the ID token as <code>id_token_hint</code>, then back to <code>/auth/signed-out</code>.</td>
+<td>On when <code>SAML_IDP_SLO_URL</code> is set. Plan Ops Hub sends a LogoutRequest signed with its own key; the provider&#39;s LogoutResponse comes back to <code>/auth/saml/slo</code>.</td>
+</tr>
+<tr>
+<td><strong>Signing out at the provider ends sessions here</strong></td>
+<td><strong>Back-channel logout:</strong> the provider calls <code>/auth/oidc/backchannel-logout</code> server to server when a session ends, including when an administrator revokes it. Works even if the browser is closed.</td>
+<td><strong>Front-channel logout:</strong> the provider sends a signed LogoutRequest through the browser to <code>/auth/saml/slo</code>. Plan Ops Hub ends the matching sessions and replies with a signed LogoutResponse.</td>
+</tr>
+</tbody></table></div>
+<p>Sessions are matched precisely: an OIDC logout token&#39;s <code>sid</code> ends that one
+session (a <code>sub</code> alone ends all of that person&#39;s sessions), and a SAML
+LogoutRequest&#39;s <code>SessionIndex</code> ends that one session (without one, all of that
+person&#39;s SAML sessions). Each is audited as <code>user.signed-out</code> with <code>via</code>
+<code>idp-backchannel</code> or <code>idp-slo</code>.</p>
+<h3 id="set-up-oidc-logout">Set up OIDC logout</h3>
+<ol>
+<li>In your provider&#39;s application settings, add <code>https://&lt;your address&gt;/auth/signed-out</code> as a <strong>sign-out redirect URI</strong> (Okta: <em>Sign-out redirect URIs</em>; Entra ID: <em>Front-channel logout URL</em> is not needed, but the URI must be a registered redirect URI).</li>
+<li>Set the <strong>back-channel logout URI</strong> to <code>https://&lt;your address&gt;/auth/oidc/backchannel-logout</code>, with <em>session required</em> (sid) on if offered. Okta and Auth0 support back-channel logout; Entra ID doesn&#39;t, so with Entra ID sessions here end at their normal expiry after sign-out elsewhere.</li>
+</ol>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>OIDC_POST_LOGOUT_REDIRECT_URI</code></td>
+<td><code>&lt;your address&gt;/auth/signed-out</code></td>
+<td>Where the provider sends the browser after signing out.</td>
+</tr>
+<tr>
+<td><code>SSO_LOGOUT</code></td>
+<td><code>idp</code></td>
+<td><code>local</code> to sign out of Plan Ops Hub only.</td>
+</tr>
+</tbody></table></div>
+<h3 id="set-up-saml-single-logout">Set up SAML single logout</h3>
+<ol>
+<li>Create a signing key and certificate for Plan Ops Hub, for example
+<code>openssl req -x509 -newkey rsa:2048 -sha256 -days 730 -nodes -keyout sp.key -out sp.crt -subj &quot;/CN=Plan Ops Hub&quot;</code>.
+Keep <code>sp.key</code> in your secret manager.</li>
+<li>Set the variables below and restart. The metadata at <code>/auth/saml/metadata</code> now includes the <strong>SingleLogoutService</strong> URL <code>https://&lt;your address&gt;/auth/saml/slo</code> and the signing certificate; re-import it at the provider, or enter both by hand.</li>
+<li>Turn on single logout for the application at the provider.</li>
+</ol>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Required for single logout</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SAML_IDP_SLO_URL</code></td>
+<td>yes</td>
+<td>The provider&#39;s single logout URL (HTTP-Redirect binding). Setting it turns single logout on.</td>
+</tr>
+<tr>
+<td><code>SAML_SP_PRIVATE_KEY</code></td>
+<td>yes</td>
+<td>Plan Ops Hub&#39;s signing key, PEM. Logout requests must be signed. Also signs sign-in requests.</td>
+</tr>
+<tr>
+<td><code>SAML_SP_CERT</code></td>
+<td>yes</td>
+<td>The matching certificate, PEM, published in the metadata.</td>
+</tr>
+</tbody></table></div>
+<h3 id="what-protects-logout">What protects logout</h3>
+<ul>
+<li><strong>Back-channel logout tokens</strong> must be signed by the provider for this application, issued in the last 5 minutes, carry the back-channel logout event and a <code>jti</code>, and contain no <code>nonce</code> (so an ID token can&#39;t be passed off as one). Each <code>jti</code> is accepted once.</li>
+<li><strong>SAML LogoutRequests</strong> must be signed by the provider&#39;s certificate, on both bindings. node-saml accepts unsigned ones on the redirect binding, so Plan Ops Hub checks that signature itself, over the parameters exactly as received, refusing repeated parameters. They must also come from the configured provider, be addressed to this application, be issued in the last 10 minutes, and are accepted once.</li>
+<li>A <strong>LogoutResponse</strong> that can&#39;t be verified doesn&#39;t undo anything: you are already signed out here, and the page says the provider didn&#39;t confirm.</li>
+</ul>
+<p>Without single logout (SAML without <code>SAML_IDP_SLO_URL</code>, a provider without an
+end-session endpoint, or <code>SSO_LOGOUT=local</code>), you may still be signed in at your
+identity provider after signing out here, so the next sign-in can be immediate.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <div class="table-wrap"><table>
 <thead>
@@ -329,6 +419,22 @@ be immediate.</p>
 <td>Send the email as the NameID or an attribute, or set <code>SAML_USER_ATTRIBUTE</code>.</td>
 </tr>
 <tr>
+<td>After signing out, the provider says the redirect URI isn&#39;t allowed</td>
+<td>Register <code>https://&lt;your address&gt;/auth/signed-out</code> as a sign-out redirect URI, or set <code>OIDC_POST_LOGOUT_REDIRECT_URI</code> to one you have registered.</td>
+</tr>
+<tr>
+<td><em>…didn&#39;t confirm that it signed you out too</em></td>
+<td>The provider&#39;s LogoutResponse couldn&#39;t be verified (often a changed certificate). Plan Ops Hub&#39;s session has ended regardless.</td>
+</tr>
+<tr>
+<td><em>Logout requests from the identity provider must be signed</em></td>
+<td>Turn on signing of logout messages at the provider.</td>
+</tr>
+<tr>
+<td><em>Single logout (SAML_IDP_SLO_URL) needs SAML_SP_PRIVATE_KEY and SAML_SP_CERT</em></td>
+<td>Create the key and certificate (see above).</td>
+</tr>
+<tr>
 <td><em>Development mode (no sign-in) only listens on localhost</em></td>
 <td>Configure single sign-on before serving on a network.</td>
 </tr>
@@ -339,7 +445,7 @@ be immediate.</p>
       <a href="deployment.html" style="text-align:right"><small>Next</small>Deployment</a>
     </nav>
   </article>
-  <aside class="toc"><b>On this page</b><a href="#try-it-locally">Try it locally</a><a href="#set-up-openid-connect">Set up OpenID Connect</a><a href="#set-up-saml">Set up SAML</a><a href="#who-can-sign-in">Who can sign in</a><a href="#roles">Roles</a><a href="#how-it39s-protected">How it&amp;#39;s protected</a><a href="#signing-out">Signing out</a><a href="#troubleshooting">Troubleshooting</a></aside>
+  <aside class="toc"><b>On this page</b><a href="#try-it-locally">Try it locally</a><a href="#set-up-openid-connect">Set up OpenID Connect</a><a href="#set-up-saml">Set up SAML</a><a href="#who-can-sign-in">Who can sign in</a><a href="#roles">Roles</a><a href="#how-it39s-protected">How it&amp;#39;s protected</a><a href="#signing-out-and-single-logout">Signing out and single logout</a><a href="#troubleshooting">Troubleshooting</a></aside>
 </div>
 <script>
   (function () {

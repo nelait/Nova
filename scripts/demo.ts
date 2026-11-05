@@ -4,6 +4,7 @@
 // `npm run demo:sso` (OpenID Connect) and `npm run demo:saml` (SAML 2.0) also start
 // a mock identity provider so you can try single sign-on end to end: pick who to
 // sign in as on the provider's page.
+import { generateKeyPairSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from '../src/app.ts';
@@ -22,23 +23,31 @@ const seedPeople = () => [
 if (process.argv.includes('--saml')) {
   const idpPort = Number(process.env.IDP_PORT ?? 3202);
   const idp = new MockSamlIdp({ entityId: `http://localhost:${idpPort}/saml`, ssoUrl: `http://localhost:${idpPort}/sso`, people: seedPeople() });
+  // The app's signing key for logout requests (in production: SAML_SP_PRIVATE_KEY / SAML_SP_CERT).
+  const sp = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  idp.spCertPem = sp.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   idp.listen(idpPort);
   Object.assign(process.env, {
     SAML_IDP_SSO_URL: idp.ssoUrl,
     SAML_IDP_ENTITY_ID: idp.entityId,
     SAML_IDP_CERT: idp.certPem,
     SAML_ACS_URL: `http://localhost:${port}/auth/saml/acs`,
+    SAML_IDP_SLO_URL: idp.sloUrl,
+    SAML_SP_PRIVATE_KEY: sp.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    SAML_SP_CERT: idp.spCertPem,
     HOST: process.env.HOST ?? '127.0.0.1',
   });
-  console.log(`Mock SAML identity provider on ${idp.ssoUrl} (development only)`);
+  console.log(`Mock SAML identity provider on ${idp.ssoUrl} (development only); its sessions: http://localhost:${idpPort}/sessions`);
 }
 if (process.argv.includes('--sso')) {
   const idpPort = Number(process.env.IDP_PORT ?? 3201);
   const users = seedPeople();
   const issuer = `http://localhost:${idpPort}`;
-  new MockIdp({ issuer, clientId: 'plan-ops-demo', people: users }).listen(idpPort);
+  const oidcIdp = new MockIdp({ issuer, clientId: 'plan-ops-demo', people: users });
+  oidcIdp.backchannelLogoutUri = `http://localhost:${port}/auth/oidc/backchannel-logout`;
+  oidcIdp.listen(idpPort);
   Object.assign(process.env, { OIDC_ISSUER: issuer, OIDC_CLIENT_ID: 'plan-ops-demo', OIDC_REDIRECT_URI: `http://localhost:${port}/auth/callback`, HOST: process.env.HOST ?? '127.0.0.1' });
-  console.log(`Mock identity provider on ${issuer} (development only)`);
+  console.log(`Mock identity provider on ${issuer} (development only); its sessions: ${issuer}/sessions`);
 }
 
 const live = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_PROFILE);

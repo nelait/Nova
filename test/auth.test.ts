@@ -268,3 +268,76 @@ test('the audit log filters and downloads as CSV that is safe to open in a sprea
   const future = await (await get('/api/audit?from=2999-01-01', cookie)).json();
   assert.deepEqual(future, []);
 });
+
+// ---------------------------------------------------------------- single logout (OIDC)
+const lastSid = () => [...idp.sessions.keys()].at(-1)!;
+const backchannel = (logout_token: string) =>
+  fetch(base + '/auth/oidc/backchannel-logout', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ logout_token }).toString() });
+
+test('signing out also signs out at the provider (RP-initiated logout)', async () => {
+  const { cookie } = await signIn('priya@planops.example');
+  const sid = lastSid();
+  const out = await post('/auth/logout', cookie, {});
+  const { redirect } = await out.json();
+  const to = new URL(redirect);
+  assert.equal(to.origin + to.pathname, `${ISSUER}/logout`);
+  assert.equal(to.searchParams.get('client_id'), 'plan-ops');
+  assert.equal(to.searchParams.get('post_logout_redirect_uri'), 'https://ops.example.test/auth/signed-out');
+  assert.ok(to.searchParams.get('id_token_hint'));
+  assert.equal((await get('/api/me', cookie)).status, 401, 'the local session ends first');
+  assert.equal(idp.endSession(redirect), 'https://ops.example.test/auth/signed-out');
+  assert.equal(idp.sessions.has(sid), false);
+  assert.match(await (await get('/auth/signed-out')).text(), /signed out of Plan Ops Hub and of your organization/);
+});
+
+test('SSO_LOGOUT=local keeps sign-out local', async () => {
+  const local = createApp({ dbPath: ':memory:', seedUsers: true, env: { ...SSO_ENV, SSO_LOGOUT: 'local' }, oidcTransport: idp.transport, aiModel: null, agentModel: null });
+  assert.equal(await local.auth.providerLogout(), false);
+  assert.equal(await local.auth.logout(undefined), '/auth/signed-out');
+});
+
+test('back-channel logout from the provider ends the named session, or all of a user\'s sessions', async () => {
+  const first = (await signIn('priya@planops.example')).cookie;
+  const firstSid = lastSid();
+  const second = (await signIn('priya@planops.example')).cookie;
+  const marcus = (await signIn('marcus@planops.example')).cookie;
+
+  const r = await backchannel(idp.logoutToken({ sid: firstSid }));
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('cache-control'), 'no-store');
+  assert.equal((await get('/api/me', first)).status, 401);
+  assert.equal((await get('/api/me', second)).status, 200, 'only the named session ends');
+
+  assert.equal((await backchannel(idp.logoutToken({ sub: 'mock|priya@planops.example' }))).status, 200);
+  assert.equal((await get('/api/me', second)).status, 401, 'sub alone ends all of that user\'s sessions');
+  assert.equal((await get('/api/me', marcus)).status, 200, 'other people are unaffected');
+  assert.ok(app.repos.audit.all().some((e) => e.event === 'user.signed-out' && (e.detail as { via: string }).via === 'idp-backchannel'));
+});
+
+test('forged, replayed or malformed logout tokens are refused', async () => {
+  const { cookie } = await signIn('marcus@planops.example');
+  const sid = lastSid();
+  const now = Math.floor(Date.now() / 1000);
+  const other = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey;
+  const bad: [string, string][] = [
+    ['signed by another key', idp.logoutToken({ sid, key: other })],
+    ['for another client', idp.logoutToken({ sid, extra: { aud: 'another-app' } })],
+    ['from another issuer', idp.logoutToken({ sid, extra: { iss: 'https://evil.example' } })],
+    ['an hour old', idp.logoutToken({ sid, extra: { iat: now - 3600, exp: now + 60 } })],
+    ['with a nonce', idp.logoutToken({ sid, extra: { nonce: 'n' } })],
+    ['without the logout event', idp.logoutToken({ sid, extra: { events: {} } })],
+    ['naming no session or user', idp.logoutToken({})],
+    ['an ID token', idp.idToken({ iss: ISSUER, aud: 'plan-ops', sub: 'mock|marcus@planops.example', sid, iat: now, exp: now + 60, jti: 'x' })],
+    ['not a JWT', 'not-a-jwt'],
+  ];
+  for (const [why, token] of bad) {
+    const r = await backchannel(token);
+    assert.equal(r.status, 400, why);
+    assert.equal((await r.json()).error, 'invalid_request', why);
+  }
+  assert.equal((await get('/api/me', cookie)).status, 200, 'still signed in');
+
+  const once = idp.logoutToken({ sid });
+  assert.equal((await backchannel(once)).status, 200);
+  assert.equal((await backchannel(once)).status, 400, 'replayed jti');
+});

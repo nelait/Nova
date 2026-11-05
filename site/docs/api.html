@@ -75,7 +75,17 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>POST</td>
 <td><code>/auth/logout</code></td>
-<td>Ends the session</td>
+<td>Ends the session; returns <code>{ redirect }</code>: the provider&#39;s logout (single logout) or <code>/auth/signed-out</code></td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/auth/oidc/backchannel-logout</code></td>
+<td>OIDC back-channel logout, called by the provider: form field <code>logout_token</code></td>
+</tr>
+<tr>
+<td>GET / POST</td>
+<td><code>/auth/saml/slo</code></td>
+<td>SAML single logout: LogoutRequests from the provider, LogoutResponses to ours</td>
 </tr>
 <tr>
 <td>GET</td>

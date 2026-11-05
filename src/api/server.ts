@@ -311,12 +311,46 @@ async function handleAuth(app: App, req: IncomingMessage, res: ServerResponse, u
   }
   if (req.method === 'POST' && url.pathname === '/auth/logout') {
     checkSameOrigin(req);
-    auth.logout(cookies(req)[SESSION_COOKIE]);
+    // Ends the local session, then (single logout) sends the browser to the provider.
+    const redirect = await auth.logout(cookies(req)[SESSION_COOKIE]);
     res.setHeader('set-cookie', cookie(SESSION_COOKIE, '', 0, secure));
-    return send(res, 200, { redirect: '/auth/signed-out' });
+    return send(res, 200, { redirect });
+  }
+  // OIDC back-channel logout: the provider calls this server to server, so no cookie or Origin.
+  if (!saml && req.method === 'POST' && url.pathname === '/auth/oidc/backchannel-logout') {
+    try {
+      const ended = await auth.backchannelLogout((await readForm(req)).get('logout_token'));
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      return void res.end(JSON.stringify({ ended }));
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      return send(res, e.status === 404 ? 404 : 400, { error: 'invalid_request', error_description: e.message });
+    }
+  }
+  // SAML single logout: LogoutRequests from the provider and LogoutResponses to ours, via the browser.
+  if (saml && (req.method === 'GET' || req.method === 'POST') && url.pathname === '/auth/saml/slo') {
+    try {
+      const params = req.method === 'GET' ? url.searchParams : await readForm(req);
+      const { redirect, confirmed } = await auth.samlSlo(req.method, params, url.search.slice(1));
+      res.writeHead(req.method === 'GET' ? 302 : 303, {
+        location: confirmed ? redirect : '/auth/signed-out?unconfirmed=1',
+        // If this browser is the one being signed out, drop its cookie too.
+        'set-cookie': cookie(SESSION_COOKIE, '', 0, secure),
+        'cache-control': 'no-store',
+      });
+      return void res.end();
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      return page(res, 400, 'Sign-out request refused', e.message);
+    }
   }
   if (req.method === 'GET' && url.pathname === '/auth/signed-out') {
-    return page(res, 200, 'You’re signed out', 'Your Plan Ops Hub session has ended. You may still be signed in to your organization’s identity provider.', { href: '/auth/login', label: 'Sign in again' });
+    const message = url.searchParams.has('unconfirmed')
+      ? 'Your Plan Ops Hub session has ended. Your organization’s identity provider didn’t confirm that it signed you out too; close your browser to be sure.'
+      : (await auth.providerLogout())
+        ? 'You’re signed out of Plan Ops Hub and of your organization’s sign-in.'
+        : 'Your Plan Ops Hub session has ended. You may still be signed in to your organization’s identity provider.';
+    return page(res, 200, 'You’re signed out', message, { href: '/auth/login', label: 'Sign in again' });
   }
   return send(res, 404, { error: 'No such route' });
 }

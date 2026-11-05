@@ -606,7 +606,7 @@ function renderWho(user) {
   const who = $('#who');
   who.hidden = false;
   who.innerHTML = `<span class="avatar" aria-hidden="true">${esc(initials)}</span><div title="${esc(user.email)}"><b>${esc(user.name)}</b>${user.readOnly ? '<span class="badge-ro" title="Read-only access">Auditor</span>' : `<span>${esc(user.email)}</span>`}</div><button class="btn secondary" id="signOut">Sign out</button>`;
-  $('#signOut').onclick = () => guarded(async () => { await fetch('/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); location.href = '/auth/signed-out'; });
+  $('#signOut').onclick = () => guarded(async () => { const r = await fetch('/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then((x) => x.json()).catch(() => ({})); location.href = r.redirect || '/auth/signed-out'; });
 }
 
 async function boot() {

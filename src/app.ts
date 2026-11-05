@@ -15,7 +15,7 @@ import { GuidanceService } from './guidance/guidedActions.ts';
 import { computeInsights } from './learning/insights.ts';
 import { AiAssistService, claudeModelCall, type AiAssist, type ModelCall } from './ai/claudeAssist.ts';
 import { AgentRunner, claudeAgentModel, type AgentModel } from './ai/agents.ts';
-import { AuthService, type LoginRequest, type Session } from './auth/auth.ts';
+import { AuthService, type LoginRequest, type SeenToken, type Session } from './auth/auth.ts';
 import { OidcClient, oidcConfigFromEnv } from './auth/oidc.ts';
 import { SamlClient, samlConfigFromEnv, type PendingSamlRequest } from './auth/saml.ts';
 
@@ -85,9 +85,12 @@ export function createApp(opts: AppOptions = {}) {
   const samlConfig = samlConfigFromEnv(env);
   const auth = new AuthService({
     oidc: oidcConfig ? new OidcClient(oidcConfig, opts.oidcTransport, () => clock.now().getTime()) : undefined,
-    saml: samlConfig ? new SamlClient(samlConfig, new Collection<PendingSamlRequest>(db, 'saml_requests'), () => clock.now().getTime()) : undefined,
+    saml: samlConfig
+      ? new SamlClient(samlConfig, { requests: new Collection<PendingSamlRequest>(db, 'saml_requests'), seenLogouts: new Collection<PendingSamlRequest>(db, 'saml_logouts_seen') }, () => clock.now().getTime())
+      : undefined,
     sessions: new Collection<Session>(db, 'sessions'),
     requests: new Collection<LoginRequest>(db, 'login_requests'),
+    seenTokens: new Collection<SeenToken>(db, 'logout_tokens_seen'),
     users,
     audit: (actor, entityId, event, detail) => cases.audit(actor, 'user', entityId, event, detail),
     now: () => clock.now(),

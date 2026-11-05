@@ -19,7 +19,20 @@ const idp = new MockSamlIdp({
     { email: 'olivia@planops.example', name: 'Olivia Grant' },
   ],
 });
-const SAML_ENV = { SAML_IDP_SSO_URL: idp.ssoUrl, SAML_IDP_ENTITY_ID: idp.entityId, SAML_IDP_CERT: idp.certPem, SAML_ACS_URL: ACS };
+const SLO = 'https://ops.example.test/auth/saml/slo';
+const sp = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const SP_KEY = sp.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+const SP_CERT = sp.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+idp.spCertPem = SP_CERT;
+const SAML_ENV = {
+  SAML_IDP_SSO_URL: idp.ssoUrl,
+  SAML_IDP_ENTITY_ID: idp.entityId,
+  SAML_IDP_CERT: idp.certPem,
+  SAML_ACS_URL: ACS,
+  SAML_IDP_SLO_URL: idp.sloUrl,
+  SAML_SP_PRIVATE_KEY: SP_KEY,
+  SAML_SP_CERT: SP_CERT,
+};
 
 let app: App;
 let server: Server;
@@ -55,8 +68,9 @@ function postAcs(form: { SAMLResponse: string; RelayState: string }, cookie: str
 /** Full browser flow; returns the ACS response and the session cookie (empty if refused). */
 async function signIn(email: string, opts: SamlResponseOptions = {}, returnTo = '/') {
   const { authUrl, loginCookie } = await startLogin(returnTo);
-  const acs = await postAcs(idp.respond(authUrl, email, opts), loginCookie);
-  return { acs, cookie: asCookie(setCookie(acs, 'planops_session')) };
+  const response = idp.respond(authUrl, email, opts);
+  const acs = await postAcs(response, loginCookie);
+  return { acs, cookie: asCookie(setCookie(acs, 'planops_session')), sessionIndex: response.sessionIndex };
 }
 const whoAmI = async (cookie: string) => (await (await fetch(base + '/api/me', { headers: { cookie } })).json()).user?.id;
 
@@ -91,6 +105,8 @@ test('service provider metadata is published for the IdP administrator', async (
   assert.match(xml, /entityID="https:\/\/ops\.example\.test\/auth\/saml\/metadata"/);
   assert.match(xml, /AssertionConsumerService[^>]+Location="https:\/\/ops\.example\.test\/auth\/saml\/acs"/);
   assert.match(xml, /WantAssertionsSigned="true"/);
+  assert.match(xml, /SingleLogoutService[^>]+Location="https:\/\/ops\.example\.test\/auth\/saml\/slo"/);
+  assert.match(xml, /KeyDescriptor use="signing"/);
 });
 
 test('a changed assertion fails its signature check', async () => {
@@ -170,6 +186,8 @@ test('OIDC routes are not available in SAML mode, and the ACS only takes form po
 test('SAML settings are checked at startup', () => {
   assert.equal(samlConfigFromEnv({}), undefined);
   assert.throws(() => samlConfigFromEnv({ SAML_IDP_SSO_URL: idp.ssoUrl }), /SAML_IDP_ENTITY_ID, SAML_IDP_CERT, SAML_ACS_URL are not set/);
+  assert.throws(() => samlConfigFromEnv({ ...SAML_ENV, SAML_SP_PRIVATE_KEY: '' }), /needs SAML_SP_PRIVATE_KEY: logout requests must be signed/);
+  assert.equal(samlConfigFromEnv(SAML_ENV)!.sloUrl, SLO);
   assert.throws(() => samlConfigFromEnv({ ...SAML_ENV, SAML_ACS_URL: 'http://ops.example.test/auth/saml/acs' }), /SAML_ACS_URL must use https/);
   assert.throws(() => samlConfigFromEnv({ ...SAML_ENV, SAML_ACS_URL: 'https://ops.example.test/callback' }), /must end with \/auth\/saml\/acs/);
   assert.equal(samlConfigFromEnv({ ...SAML_ENV, SAML_SP_ENTITY_ID: 'urn:planops' })!.spEntityId, 'urn:planops');
@@ -177,4 +195,74 @@ test('SAML settings are checked at startup', () => {
     () => createApp({ dbPath: ':memory:', env: { ...SAML_ENV, OIDC_ISSUER: 'https://idp.example.test', OIDC_CLIENT_ID: 'x', OIDC_REDIRECT_URI: 'https://ops.example.test/auth/callback' }, aiModel: null, agentModel: null }),
     /either OpenID Connect .* or SAML/,
   );
+});
+
+// ---------------------------------------------------------------- single logout (SAML)
+const slo = (absolute: string) => {
+  const u = new URL(absolute);
+  return fetch(base + u.pathname + u.search, { redirect: 'manual' });
+};
+
+test('signing out sends a signed LogoutRequest to the IdP, whose LogoutResponse completes it', async () => {
+  const { cookie, sessionIndex } = await signIn('priya@planops.example');
+  const out = await fetch(base + '/auth/logout', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{}' });
+  const { redirect } = await out.json();
+  assert.ok(redirect.startsWith(idp.sloUrl + '?SAMLRequest='));
+  assert.match(redirect, /&Signature=/);
+  assert.equal(await whoAmI(cookie), undefined, 'the local session ends first');
+
+  // The mock IdP refuses LogoutRequests not signed with the app's key.
+  const back = idp.handleLogoutRequest(redirect);
+  assert.deepEqual([back.nameID, back.sessionIndex], ['priya@planops.example', sessionIndex]);
+  assert.equal(idp.sessions.has(sessionIndex), false);
+  const done = await slo(back.redirect);
+  assert.equal(done.status, 302);
+  assert.equal(done.headers.get('location'), '/auth/signed-out');
+
+  // A LogoutResponse that doesn't check out still leaves the user signed out, and says so.
+  const junk = await fetch(base + '/auth/saml/slo?SAMLResponse=' + encodeURIComponent(Buffer.from('nope').toString('base64')), { redirect: 'manual' });
+  assert.equal(junk.headers.get('location'), '/auth/signed-out?unconfirmed=1');
+});
+
+test('a LogoutRequest from the IdP ends that session and replies with a LogoutResponse', async () => {
+  const a = await signIn('priya@planops.example');
+  const b = await signIn('priya@planops.example');
+  const r = await slo(idp.logoutRequest(SLO, { nameID: 'priya@planops.example', sessionIndex: a.sessionIndex }));
+  assert.equal(r.status, 302);
+  const to = new URL(r.headers.get('location')!);
+  assert.equal(to.origin + to.pathname, idp.sloUrl);
+  assert.ok(to.searchParams.get('SAMLResponse') && to.searchParams.get('Signature'), 'signed LogoutResponse');
+  assert.equal(to.searchParams.get('RelayState'), 'idp-logout');
+  assert.equal(await whoAmI(a.cookie), undefined);
+  assert.equal(await whoAmI(b.cookie), 'u_priya', 'only the named IdP session ends');
+  // Without a SessionIndex, all of that person's SAML sessions end.
+  await slo(idp.logoutRequest(SLO, { nameID: 'priya@planops.example' }));
+  assert.equal(await whoAmI(b.cookie), undefined);
+  assert.ok(app.repos.audit.all().some((e) => e.event === 'user.signed-out' && (e.detail as { via: string }).via === 'idp-slo'));
+});
+
+test('unsigned, forged, stale, misaddressed or replayed LogoutRequests are refused', async () => {
+  const { cookie, sessionIndex } = await signIn('marcus@planops.example');
+  const who = { nameID: 'marcus@planops.example', sessionIndex };
+  const other = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey;
+  const signedOnce = idp.logoutRequest(SLO, who);
+  const bad: [string, string][] = [
+    ['unsigned (node-saml alone would accept this)', idp.logoutRequest(SLO, who, { unsigned: true })],
+    ['signed by another key', idp.logoutRequest(SLO, who, { signingKey: other })],
+    ['from another issuer', idp.logoutRequest(SLO, who, { issuer: 'https://evil.example/saml' })],
+    ['issued an hour ago', idp.logoutRequest(SLO, who, { issuedAgoSeconds: 3600 })],
+    ['for another application', idp.logoutRequest(SLO, who, { destination: 'https://another-app.example/slo' })],
+    ['with a repeated parameter', signedOnce + '&SAMLRequest=x'],
+    ['with a changed RelayState', signedOnce.replace('RelayState=idp-logout', 'RelayState=other')],
+  ];
+  for (const [why, url] of bad) {
+    const r = await slo(url);
+    assert.equal(r.status, 400, why);
+    assert.equal(await whoAmI(cookie), 'u_marcus', why);
+  }
+  assert.equal((await slo(signedOnce)).status, 302);
+  assert.equal(await whoAmI(cookie), undefined);
+  const again = await signIn('marcus@planops.example');
+  assert.equal((await slo(signedOnce)).status, 400, 'replayed');
+  assert.equal(await whoAmI(again.cookie), 'u_marcus');
 });

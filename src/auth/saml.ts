@@ -1,3 +1,5 @@
+import { createVerify } from 'node:crypto';
+import { inflateRawSync } from 'node:zlib';
 import { SAML, ValidateInResponseTo, type CacheItem, type CacheProvider, type Profile } from '@node-saml/node-saml';
 import { DOMParser } from '@xmldom/xmldom';
 import type { Collection } from '../store/db.ts';
@@ -32,7 +34,28 @@ export interface SamlConfig {
   userAttribute?: string;
   /** Also require the whole response to be signed (default: assertion signature only). */
   wantResponseSigned: boolean;
+  /** IdP single logout URL; set to enable single logout. */
+  idpSloUrl?: string;
+  /** This app's /auth/saml/slo URL. */
+  sloUrl: string;
+  /** This app's signing key and certificate (PEM): logout requests must be signed. */
+  spPrivateKey?: string;
+  spCert?: string;
 }
+
+/** What identifies a user's session at the IdP, kept with the local session for logout. */
+export interface SamlSessionRef {
+  nameID: string;
+  nameIDFormat: string;
+  sessionIndex?: string;
+  nameQualifier?: string;
+  spNameQualifier?: string;
+}
+
+/** Outcome of a message posted or redirected to /auth/saml/slo. */
+export type SloMessage =
+  | { kind: 'response'; ok: boolean; error?: string }
+  | { kind: 'request'; ref: SamlSessionRef; reply: Profile; relayState: string };
 
 const EMAIL_ATTRIBUTES = [
   'email',
@@ -79,13 +102,29 @@ class CollectionCache implements CacheProvider {
   }
 }
 
+const SIG_ALGS: Record<string, string> = {
+  'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256': 'sha256',
+  'http://www.w3.org/2001/04/xmldsig-more#rsa-sha512': 'sha512',
+};
+
+const toPem = (c: string) =>
+  c.includes('-----BEGIN') ? c : `-----BEGIN CERTIFICATE-----\n${c.replace(/\s+/g, '').match(/.{1,64}/g)!.join('\n')}\n-----END CERTIFICATE-----\n`;
+
 export class SamlClient {
   readonly config: SamlConfig;
   private saml: SAML;
+  private seen: Collection<PendingSamlRequest>;
+  private now: () => number;
 
-  constructor(config: SamlConfig, requests: Collection<PendingSamlRequest>, now: () => number = Date.now) {
+  constructor(config: SamlConfig, store: { requests: Collection<PendingSamlRequest>; seenLogouts: Collection<PendingSamlRequest> }, now: () => number = Date.now) {
     this.config = config;
+    this.seen = store.seenLogouts;
+    this.now = now;
+    const requests = store.requests;
     this.saml = new SAML({
+      logoutUrl: config.idpSloUrl ?? config.idpSsoUrl,
+      logoutCallbackUrl: config.sloUrl,
+      ...(config.spPrivateKey ? { privateKey: config.spPrivateKey, publicCert: config.spCert } : {}),
       entryPoint: config.idpSsoUrl,
       issuer: config.spEntityId,
       audience: config.spEntityId,
@@ -111,13 +150,112 @@ export class SamlClient {
     return this.saml.getAuthorizeUrlAsync(relayState, undefined, {});
   }
 
-  /** SP metadata XML for the IdP administrator. */
+  /** SP metadata XML for the IdP administrator (with the SP signing certificate and SLO URL when set). */
   metadata(): string {
-    return this.saml.generateServiceProviderMetadata(null, null);
+    return this.saml.generateServiceProviderMetadata(null, this.config.spCert ?? null);
+  }
+
+  get singleLogout(): boolean {
+    return !!this.config.idpSloUrl;
+  }
+
+  /** SP-initiated logout: a signed LogoutRequest to the IdP, as a redirect URL. */
+  async logoutUrl(ref: SamlSessionRef, relayState = ''): Promise<string | undefined> {
+    if (!this.singleLogout) return undefined;
+    return this.saml.getLogoutUrlAsync(ref as unknown as Profile, relayState, {});
+  }
+
+  /** The LogoutResponse to send back after ending the sessions an IdP LogoutRequest named. */
+  logoutResponseUrl(request: Profile, relayState: string): Promise<string> {
+    return this.saml.getLogoutResponseUrlAsync(request, relayState, {}, true);
+  }
+
+  /**
+   * A LogoutRequest or LogoutResponse sent to /auth/saml/slo by the IdP, through the
+   * browser (front-channel), as a redirect (GET) or a form post.
+   *
+   * LogoutRequests can end anyone's sessions, so they must be signed by the IdP:
+   * node-saml accepts unsigned ones on the redirect binding, so that signature is
+   * checked here first. Each request is accepted once and only within 10 minutes
+   * of being issued, so a captured one can't be replayed later.
+   */
+  async handleSlo(method: 'GET' | 'POST', params: URLSearchParams, rawQuery: string): Promise<SloMessage> {
+    const isRequest = params.has('SAMLRequest');
+    const relayState = params.get('RelayState') ?? '';
+    if (!isRequest) {
+      if (!params.get('SAMLResponse')) throw new AuthError('Expected a SAML LogoutRequest or LogoutResponse', 400);
+      try {
+        if (method === 'GET') await this.saml.validateRedirectAsync(Object.fromEntries(params), rawQuery);
+        else await this.saml.validatePostResponseAsync({ SAMLResponse: params.get('SAMLResponse')! });
+        return { kind: 'response', ok: true };
+      } catch (e) {
+        return { kind: 'response', ok: false, error: (e as Error).message };
+      }
+    }
+    let xml: string;
+    let profile: Profile | null;
+    try {
+      if (method === 'GET') {
+        this.checkRedirectSignature(rawQuery);
+        xml = inflateRawSync(Buffer.from(params.get('SAMLRequest')!, 'base64')).toString('utf8');
+        ({ profile } = await this.saml.validateRedirectAsync(Object.fromEntries(params), rawQuery));
+      } else {
+        xml = Buffer.from(params.get('SAMLRequest')!, 'base64').toString('utf8');
+        ({ profile } = await this.saml.validatePostRequestAsync({ SAMLRequest: params.get('SAMLRequest')! }));
+      }
+    } catch (e) {
+      if (e instanceof AuthError) throw e;
+      throw new AuthError(`The identity provider's logout request was rejected: ${(e as Error).message}`, 400);
+    }
+    if (!profile?.ID || !profile.nameID) throw new AuthError('Logout request has no ID or NameID', 400);
+    if (profile.issuer !== this.config.idpEntityId) throw new AuthError(`Logout request was issued by ${profile.issuer}, not the configured identity provider`, 400);
+    const root = new DOMParser().parseFromString(xml, 'text/xml').documentElement;
+    const destination = root?.getAttribute('Destination');
+    if (destination && destination !== this.config.sloUrl) throw new AuthError(`Logout request was sent to ${destination}, not this application`, 400);
+    const issued = Date.parse(root?.getAttribute('IssueInstant') ?? '');
+    if (!Number.isFinite(issued) || Math.abs(this.now() - issued) > REQUEST_TTL_MS) throw new AuthError('Logout request is too old, or its IssueInstant is missing', 400);
+    const cutoff = this.now() - 2 * REQUEST_TTL_MS;
+    for (const old of this.seen.find((r) => r.createdAt < cutoff)) this.seen.delete(old.id);
+    if (this.seen.get(profile.ID)) throw new AuthError('This logout request was already processed', 400);
+    this.seen.insert({ id: profile.ID, value: profile.nameID, createdAt: this.now() });
+    return {
+      kind: 'request',
+      ref: { nameID: profile.nameID, nameIDFormat: profile.nameIDFormat, sessionIndex: profile.sessionIndex },
+      reply: profile,
+      relayState,
+    };
+  }
+
+  /**
+   * HTTP-Redirect binding signature (SAML bindings 3.4.4.1): over the URL-encoded
+   * "SAMLRequest=…&RelayState=…&SigAlg=…" exactly as received. Required, and each
+   * parameter may appear once.
+   */
+  private checkRedirectSignature(rawQuery: string): void {
+    const raw: Record<string, string> = {};
+    for (const part of rawQuery.split('&')) {
+      const i = part.indexOf('=');
+      const k = decodeURIComponent(i < 0 ? part : part.slice(0, i));
+      if (k in raw) throw new AuthError(`Logout request repeats the ${k} parameter`, 400);
+      raw[k] = i < 0 ? '' : part.slice(i + 1);
+    }
+    if (!raw.Signature || !raw.SigAlg) throw new AuthError('Logout requests from the identity provider must be signed', 400);
+    const hash = SIG_ALGS[decodeURIComponent(raw.SigAlg)];
+    if (!hash) throw new AuthError(`Logout request signature algorithm ${decodeURIComponent(raw.SigAlg)} is not allowed`, 400);
+    const signed = `SAMLRequest=${raw.SAMLRequest}${'RelayState' in raw ? `&RelayState=${raw.RelayState}` : ''}&SigAlg=${raw.SigAlg}`;
+    const signature = Buffer.from(decodeURIComponent(raw.Signature), 'base64');
+    const ok = this.config.idpCerts.some((cert) => {
+      try {
+        return createVerify(hash).update(signed).verify(toPem(cert), signature);
+      } catch {
+        return false;
+      }
+    });
+    if (!ok) throw new AuthError('Logout request signature is invalid', 400);
   }
 
   /** Validate a posted SAMLResponse and return the user's email. */
-  async verify(samlResponse: string): Promise<{ email: string; profile: Profile }> {
+  async verify(samlResponse: string): Promise<{ email: string; profile: Profile; ref: SamlSessionRef }> {
     let profile: Profile | null;
     try {
       ({ profile } = await this.saml.validatePostResponseAsync({ SAMLResponse: samlResponse }));
@@ -128,7 +266,10 @@ export class SamlClient {
     this.checkRecipients(samlResponse, profile);
     const email = this.emailFrom(profile);
     if (!email) throw new AuthError(`The SAML assertion has no ${this.config.userAttribute ? `"${this.config.userAttribute}" attribute` : 'email attribute or email NameID'}`, 403);
-    return { email, profile };
+    const ref: SamlSessionRef = { nameID: profile.nameID, nameIDFormat: profile.nameIDFormat, sessionIndex: profile.sessionIndex };
+    if (profile.nameQualifier) ref.nameQualifier = profile.nameQualifier;
+    if (profile.spNameQualifier) ref.spNameQualifier = profile.spNameQualifier;
+    return { email, profile, ref };
   }
 
   /**
@@ -180,6 +321,12 @@ export function samlConfigFromEnv(env: Record<string, string | undefined>): Saml
   }
   if (!/\/auth\/saml\/acs$/.test(new URL(env.SAML_ACS_URL!).pathname)) throw new Error('SAML_ACS_URL must end with /auth/saml/acs');
   const acs = new URL(env.SAML_ACS_URL!);
+  if (env.SAML_IDP_SLO_URL) {
+    const need = ['SAML_SP_PRIVATE_KEY', 'SAML_SP_CERT'].filter((k) => !env[k]);
+    if (need.length) throw new Error(`Single logout (SAML_IDP_SLO_URL) needs ${need.join(' and ')}: logout requests must be signed`);
+    if (!env.SAML_IDP_SLO_URL.startsWith('https://') && !isLocal(env.SAML_IDP_SLO_URL)) throw new Error('SAML_IDP_SLO_URL must use https');
+  }
+  const pem = (v: string | undefined) => v?.replace(/\\n/g, '\n').trim() || undefined;
   return {
     idpSsoUrl: env.SAML_IDP_SSO_URL,
     idpEntityId: env.SAML_IDP_ENTITY_ID!,
@@ -188,6 +335,10 @@ export function samlConfigFromEnv(env: Record<string, string | undefined>): Saml
     acsUrl: env.SAML_ACS_URL!,
     userAttribute: env.SAML_USER_ATTRIBUTE || undefined,
     wantResponseSigned: env.SAML_WANT_RESPONSE_SIGNED === 'true',
+    idpSloUrl: env.SAML_IDP_SLO_URL || undefined,
+    sloUrl: `${acs.origin}${acs.pathname.replace(/\/acs$/, '/slo')}`,
+    spPrivateKey: pem(env.SAML_SP_PRIVATE_KEY),
+    spCert: pem(env.SAML_SP_CERT),
   };
 }
 

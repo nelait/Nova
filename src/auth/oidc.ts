@@ -17,6 +17,10 @@ export interface OidcConfig {
   scopes: string[];
   /** ID token claim used to find the user in the directory (default: email). */
   userClaim: string;
+  /** Where the provider sends the browser after signing out (registered with the provider). */
+  postLogoutRedirectUri: string;
+  /** Sign out of the provider too when signing out here, if it supports it (default true). */
+  idpLogout: boolean;
 }
 
 interface Discovery {
@@ -25,7 +29,10 @@ interface Discovery {
   token_endpoint: string;
   jwks_uri: string;
   end_session_endpoint?: string;
+  backchannel_logout_supported?: boolean;
 }
+
+const BACKCHANNEL_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
 
 export class AuthError extends Error {
   status: number;
@@ -93,17 +100,28 @@ export class OidcClient {
     return u.toString();
   }
 
-  async logoutUrl(postLogoutRedirect: string): Promise<string | undefined> {
+  /**
+   * RP-initiated logout (OpenID Connect RP-Initiated Logout 1.0): the provider's
+   * end-session URL, or undefined when it has none or provider logout is off.
+   */
+  async logoutUrl(idTokenHint: string | undefined): Promise<string | undefined> {
+    if (!this.config.idpLogout) return undefined;
     const d = await this.metadata();
     if (!d.end_session_endpoint) return undefined;
     const u = new URL(d.end_session_endpoint);
     u.searchParams.set('client_id', this.config.clientId);
-    u.searchParams.set('post_logout_redirect_uri', postLogoutRedirect);
+    if (idTokenHint) u.searchParams.set('id_token_hint', idTokenHint);
+    u.searchParams.set('post_logout_redirect_uri', this.config.postLogoutRedirectUri);
     return u.toString();
   }
 
-  /** Exchange the code and return the verified ID token claims. */
-  async exchange(code: string, codeVerifier: string, nonce: string): Promise<Record<string, unknown>> {
+  /** Whether signing out here also signs out at the provider. */
+  async providerLogoutAvailable(): Promise<boolean> {
+    return this.config.idpLogout && !!(await this.metadata()).end_session_endpoint;
+  }
+
+  /** Exchange the code and return the verified ID token claims and the raw token (kept for logout). */
+  async exchange(code: string, codeVerifier: string, nonce: string): Promise<{ claims: Record<string, unknown>; idToken: string }> {
     const d = await this.metadata();
     const form = new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: this.config.redirectUri, client_id: this.config.clientId, code_verifier: codeVerifier });
     if (this.config.clientSecret) form.set('client_secret', this.config.clientSecret);
@@ -111,10 +129,42 @@ export class OidcClient {
     if (res.status !== 200) throw new AuthError(`Sign-in failed at the identity provider (token endpoint returned ${res.status})`, 502);
     const tokens = JSON.parse(res.body) as { id_token?: string };
     if (!tokens.id_token) throw new AuthError('Identity provider returned no ID token', 502);
-    return this.verifyIdToken(tokens.id_token, nonce);
+    return { claims: await this.verifyIdToken(tokens.id_token, nonce), idToken: tokens.id_token };
   }
 
   async verifyIdToken(jwt: string, nonce: string): Promise<Record<string, unknown>> {
+    const claims = await this.verifyJwt(jwt);
+    const nowSec = Math.floor(this.now() / 1000);
+    const skew = 60;
+    if (typeof claims.exp !== 'number' || claims.exp + skew < nowSec) throw new AuthError('ID token has expired');
+    if (typeof claims.nbf === 'number' && claims.nbf - skew > nowSec) throw new AuthError('ID token is not valid yet');
+    if (claims.nonce !== nonce) throw new AuthError('ID token nonce does not match');
+    if (claims.events !== undefined) throw new AuthError('A logout token is not an ID token');
+    return claims;
+  }
+
+  /**
+   * Back-channel logout token (OpenID Connect Back-Channel Logout 1.0): signed by
+   * the provider for this client, recent, with the logout event, a sid or sub,
+   * a jti (the caller refuses repeats), and no nonce (so an ID token can't pose as one).
+   */
+  async verifyLogoutToken(jwt: string): Promise<{ sub?: string; sid?: string; jti: string; iat: number }> {
+    const claims = await this.verifyJwt(jwt);
+    const nowSec = Math.floor(this.now() / 1000);
+    const events = claims.events as Record<string, unknown> | undefined;
+    if (!events || typeof events !== 'object' || typeof events[BACKCHANNEL_EVENT] !== 'object') throw new AuthError('Logout token has no back-channel logout event', 400);
+    if ('nonce' in claims) throw new AuthError('Logout token must not contain a nonce', 400);
+    if (typeof claims.iat !== 'number' || Math.abs(nowSec - claims.iat) > 300) throw new AuthError('Logout token is too old or from the future', 400);
+    if (typeof claims.exp === 'number' && claims.exp + 60 < nowSec) throw new AuthError('Logout token has expired', 400);
+    if (typeof claims.jti !== 'string' || !claims.jti) throw new AuthError('Logout token has no jti', 400);
+    const sub = typeof claims.sub === 'string' ? claims.sub : undefined;
+    const sid = typeof claims.sid === 'string' ? claims.sid : undefined;
+    if (!sub && !sid) throw new AuthError('Logout token names neither a session (sid) nor a user (sub)', 400);
+    return { sub, sid, jti: claims.jti, iat: claims.iat };
+  }
+
+  /** Signature, issuer, audience and issue time: the checks every provider-signed JWT needs. */
+  private async verifyJwt(jwt: string): Promise<Record<string, unknown>> {
     const parts = jwt.split('.');
     if (parts.length !== 3) throw new AuthError('Malformed ID token');
     let header: { alg?: string; kid?: string };
@@ -138,10 +188,7 @@ export class OidcClient {
     if (claims.iss !== d.issuer) throw new AuthError('ID token issuer does not match');
     if (!aud.includes(this.config.clientId)) throw new AuthError('ID token audience does not match');
     if (aud.length > 1 && claims.azp !== undefined && claims.azp !== this.config.clientId) throw new AuthError('ID token authorized party does not match');
-    if (typeof claims.exp !== 'number' || claims.exp + skew < nowSec) throw new AuthError('ID token has expired');
     if (typeof claims.iat === 'number' && claims.iat - skew > nowSec) throw new AuthError('ID token is issued in the future');
-    if (typeof claims.nbf === 'number' && claims.nbf - skew > nowSec) throw new AuthError('ID token is not valid yet');
-    if (claims.nonce !== nonce) throw new AuthError('ID token nonce does not match');
     return claims;
   }
 
@@ -180,7 +227,10 @@ export function oidcConfigFromEnv(env: Record<string, string | undefined>): Oidc
   const missing = ['OIDC_CLIENT_ID', 'OIDC_REDIRECT_URI'].filter((k) => !env[k]);
   if (missing.length) throw new Error(`Single sign-on is configured (OIDC_ISSUER) but ${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} not set`);
   if (!/^https:\/\//.test(env.OIDC_ISSUER) && !/^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(env.OIDC_ISSUER)) throw new Error('OIDC_ISSUER must use https');
+  const redirect = new URL(env.OIDC_REDIRECT_URI!);
   return {
+    postLogoutRedirectUri: env.OIDC_POST_LOGOUT_REDIRECT_URI ?? `${redirect.origin}/auth/signed-out`,
+    idpLogout: (env.SSO_LOGOUT ?? 'idp') !== 'local',
     issuer: env.OIDC_ISSUER,
     clientId: env.OIDC_CLIENT_ID!,
     clientSecret: env.OIDC_CLIENT_SECRET,
