@@ -1,0 +1,51 @@
+{
+  "id": "maintenance-funds",
+  "version": 1,
+  "caseType": "MAINTENANCE_FUNDS",
+  "name": "Change fund lineup",
+  "description": "Add, remove or map investment options in the plan's lineup.",
+  "steps": [
+    {
+      "id": "validate-request",
+      "name": "Validate fund change request",
+      "skill": "MAINTENANCE",
+      "mode": "AUTO",
+      "action": { "type": "compliance.check", "params": { "ruleset": "fund-change" } },
+      "slaHours": 4,
+      "guidance": "The new lineup must be complete, keep exactly one QDIA, and give an effective date."
+    },
+    {
+      "id": "review-lineup",
+      "name": "Investment review of new lineup and fund mapping",
+      "skill": "INVESTMENTS",
+      "mode": "REVIEW",
+      "action": { "type": "none" },
+      "dependsOn": ["validate-request"],
+      "slaHours": 48,
+      "guidance": "Review the funds being removed and where their balances map to. Mapping to funds with similar risk and return keeps the fiduciary protection of a qualified change.",
+      "checklist": ["Each removed fund maps to a fund with similar risk/return", "QDIA unchanged or replacement is QDIA-eligible"],
+      "regulatoryRef": "ERISA 404(c)(4) qualified change in investment options"
+    },
+    {
+      "id": "participant-notice",
+      "name": "Send fund change notice to sponsor for participant distribution",
+      "skill": "MAINTENANCE",
+      "mode": "REVIEW",
+      "action": { "type": "email.send", "params": { "template": "fund-change-notice", "to": ["PLAN_ADMINISTRATOR"] } },
+      "dependsOn": ["review-lineup"],
+      "slaHours": 24,
+      "guidance": "Participants must be notified 30 to 60 days before a qualified change in investment options. Check that the effective date leaves at least 30 days.",
+      "regulatoryRef": "ERISA 404(c)(4)(C) – 30 to 60 days advance notice"
+    },
+    {
+      "id": "apply-funds",
+      "name": "Apply new lineup on recordkeeper",
+      "skill": "MAINTENANCE",
+      "minSkillLevel": 2,
+      "mode": "REVIEW",
+      "action": { "type": "funds.apply", "params": { "source": "request" } },
+      "dependsOn": ["participant-notice"],
+      "guidance": "Submits the new lineup to the recordkeeper."
+    }
+  ]
+}

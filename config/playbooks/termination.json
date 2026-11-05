@@ -1,0 +1,71 @@
+{
+  "id": "termination",
+  "version": 1,
+  "caseType": "TERMINATION",
+  "name": "Plan termination / deconversion",
+  "description": "Sponsor ends the relationship (moving to a successor provider or terminating the plan).",
+  "steps": [
+    {
+      "id": "validate-request",
+      "name": "Validate termination request",
+      "skill": "TERMINATIONS",
+      "mode": "AUTO",
+      "action": { "type": "compliance.check", "params": { "ruleset": "termination" } },
+      "slaHours": 4,
+      "guidance": "Must include reason, requested effective date and successor provider (if deconverting)."
+    },
+    {
+      "id": "verify-authority",
+      "name": "Verify termination authorization",
+      "skill": "COMPLIANCE",
+      "mode": "MANUAL",
+      "action": { "type": "none" },
+      "dependsOn": ["validate-request"],
+      "slaHours": 48,
+      "guidance": "A termination or deconversion must be authorized by the plan sponsor's governing body.",
+      "checklist": ["Board resolution or equivalent received", "Signer is authorized", "Contractual notice period checked"]
+    },
+    {
+      "id": "calculate-fees",
+      "name": "Calculate termination fees",
+      "skill": "TERMINATIONS",
+      "minSkillLevel": 2,
+      "mode": "REVIEW",
+      "action": { "type": "fees.calculateTermination" },
+      "dependsOn": ["validate-request"],
+      "slaHours": 24,
+      "guidance": "Calculates the flat deconversion fee, the per-participant fee and the asset-based fee prorated to the effective date. Check the result against the contract before it is quoted to the sponsor."
+    },
+    {
+      "id": "blackout-notice",
+      "name": "Send blackout notice to sponsor for participant distribution",
+      "skill": "TERMINATIONS",
+      "mode": "REVIEW",
+      "action": { "type": "email.send", "params": { "template": "blackout-notice", "to": ["PLAN_ADMINISTRATOR"] } },
+      "dependsOn": ["verify-authority"],
+      "slaHours": 24,
+      "guidance": "Participants must get at least 30 (and no more than 60) days' notice of a blackout period of more than 3 business days, which is typical during a deconversion.",
+      "regulatoryRef": "ERISA 101(i) / 29 CFR 2520.101-3 (blackout notice)"
+    },
+    {
+      "id": "confirm-termination",
+      "name": "Send termination confirmation with final fees",
+      "skill": "TERMINATIONS",
+      "mode": "REVIEW",
+      "action": { "type": "email.send", "params": { "template": "termination-confirmation", "to": ["PLAN_ADMINISTRATOR"], "cc": ["TRUSTEE"] } },
+      "dependsOn": ["calculate-fees", "blackout-notice"],
+      "slaHours": 24,
+      "guidance": "Confirm the effective date, blackout window and final fees in writing."
+    },
+    {
+      "id": "trac-terminate",
+      "name": "Terminate plan on recordkeeper (TRAC)",
+      "skill": "TERMINATIONS",
+      "minSkillLevel": 2,
+      "mode": "REVIEW",
+      "action": { "type": "trac.terminatePlan" },
+      "dependsOn": ["confirm-termination"],
+      "guidance": "Marks the plan as terminated on the recordkeeper with the effective date and successor provider."
+    }
+  ]
+}

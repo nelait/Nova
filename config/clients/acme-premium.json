@@ -1,0 +1,26 @@
+{
+  "clientId": "acme-premium",
+  "displayName": "Premium service model (example of client customization)",
+  "playbookOverrides": {
+    "INSTALLATION": {
+      "modeOverrides": { "welcome-email": "AUTO" },
+      "addSteps": [
+        {
+          "id": "kickoff-call",
+          "name": "Hold kickoff call with sponsor",
+          "skill": "PLAN_SETUP",
+          "mode": "MANUAL",
+          "action": { "type": "none" },
+          "dependsOn": ["welcome-email"],
+          "slaHours": 72,
+          "guidance": "Premium clients get a kickoff call with their relationship manager before go-live.",
+          "checklist": ["Walk through payroll file timeline", "Confirm enrollment meeting dates"]
+        }
+      ]
+    },
+    "MAINTENANCE_CONTACT": {
+      "disableSteps": []
+    }
+  },
+  "templateOverrides": { "welcome": "welcome-acme" }
+}

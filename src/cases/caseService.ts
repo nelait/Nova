@@ -1,0 +1,342 @@
+import type { AuditEvent, Case, Plan, PlanDetails, Task, User } from '../domain/types.ts';
+import { addHours, newId, type Clock } from '../domain/util.ts';
+import { Collection, ValidationError } from '../store/db.ts';
+import type { KnowledgeBase } from '../knowledge/knowledgeBase.ts';
+import { normalizeIntake, type IntakeSubmission } from '../intake/intake.ts';
+import { ActionError, type ActionContext, type ActionExecutor, type Edits } from '../actions/executor.ts';
+import type { RecordkeeperAdapter } from '../integrations/recordkeeper.ts';
+import { routeTask } from '../routing/skillRouter.ts';
+import type { UserDirectory } from '../users/userDirectory.ts';
+
+export interface Repos {
+  plans: Collection<Plan>;
+  cases: Collection<Case>;
+  tasks: Collection<Task>;
+  audit: Collection<AuditEvent>;
+}
+
+export interface CompleteInput {
+  edits?: Edits;
+  notes?: string;
+  /** Only for steps in exception: accept the step as done without re-running it. Requires notes. */
+  override?: boolean;
+}
+
+const OPEN: Task['status'][] = ['READY', 'IN_PROGRESS'];
+
+/**
+ * The case & work item engine. A case is one business request against one plan
+ * (installation, a maintenance change, a termination). It expands into tasks from
+ * the playbook; tasks unblock as their dependencies finish; AUTO tasks run
+ * immediately, REVIEW/MANUAL tasks (and failed AUTO tasks) go to people via the
+ * skill router. When every task is done the case completes.
+ */
+export class CaseService {
+  private r: Repos;
+  private kb: KnowledgeBase;
+  private exec: ActionExecutor;
+  private rk: RecordkeeperAdapter;
+  private users: UserDirectory;
+  private clock: Clock;
+
+  constructor(r: Repos, kb: KnowledgeBase, exec: ActionExecutor, rk: RecordkeeperAdapter, users: UserDirectory, clock: Clock) {
+    this.r = r;
+    this.kb = kb;
+    this.exec = exec;
+    this.rk = rk;
+    this.users = users;
+    this.clock = clock;
+  }
+
+  private now(): string {
+    return this.clock.now().toISOString();
+  }
+
+  audit(actor: string, entity: AuditEvent['entity'], entityId: string, event: string, detail?: unknown, caseId?: string): void {
+    this.r.audit.insert({ id: newId('evt'), at: this.now(), actor, entity, entityId, caseId, event, detail });
+  }
+
+  // ---------------------------------------------------------------- intake
+
+  submitIntake(sub: IntakeSubmission, actor: string): { case: Case; tasks: Task[] } {
+    const n = normalizeIntake(sub);
+    let plan: Plan;
+
+    if (n.caseType === 'INSTALLATION') {
+      plan = {
+        id: newId('plan'),
+        clientId: n.clientId,
+        status: 'ONBOARDING',
+        details: n.planDetails!,
+        createdAt: this.now(),
+        updatedAt: this.now(),
+      };
+      this.r.plans.insert(plan);
+      this.audit(actor, 'plan', plan.id, 'plan.created', { channel: n.channel });
+    } else {
+      plan = this.r.plans.require(n.planId!);
+      if (plan.status !== 'ACTIVE' || !plan.tracPlanId) {
+        throw new ValidationError(`Plan ${plan.id} is ${plan.status}; ${n.caseType} requires an installed, active plan`);
+      }
+      const openCases = this.r.cases.find((c) => c.planId === plan.id && c.status === 'OPEN');
+      if (n.caseType === 'TERMINATION' && openCases.length) {
+        throw new ValidationError(`Plan has ${openCases.length} open case(s); finish or cancel them before terminating`);
+      }
+      // The recordkeeper is the system of record once a plan is live: refresh our snapshot first.
+      plan = this.refreshFromRecordkeeper(plan);
+      if (n.caseType === 'TERMINATION') {
+        plan = this.r.plans.update({ ...plan, status: 'TERMINATING', updatedAt: this.now() });
+      }
+    }
+
+    const pb = this.kb.playbookFor(n.caseType, plan.clientId);
+    const kase: Case = {
+      id: newId('case'),
+      planId: plan.id,
+      clientId: plan.clientId,
+      type: n.caseType,
+      channel: n.channel,
+      status: 'OPEN',
+      request: n.request,
+      playbookId: pb.id,
+      playbookVersion: pb.version,
+      createdAt: this.now(),
+    };
+    this.r.cases.insert(kase);
+    this.audit(actor, 'case', kase.id, 'case.opened', { type: kase.type, channel: kase.channel, playbook: `${pb.id}@v${pb.version}` }, kase.id);
+
+    for (const step of pb.steps) {
+      this.r.tasks.insert({
+        id: newId('task'),
+        caseId: kase.id,
+        planId: plan.id,
+        stepId: step.id,
+        name: step.name,
+        skill: step.skill,
+        minSkillLevel: step.minSkillLevel ?? 1,
+        mode: step.mode,
+        action: step.action,
+        dependsOn: step.dependsOn ?? [],
+        status: 'BLOCKED',
+        createdAt: this.now(),
+        history: [{ at: this.now(), by: 'system', event: 'created' }],
+      });
+    }
+    this.advance(kase.id);
+    return { case: this.r.cases.require(kase.id), tasks: this.tasksFor(kase.id) };
+  }
+
+  refreshFromRecordkeeper(plan: Plan): Plan {
+    if (!plan.tracPlanId) return plan;
+    const rk = this.rk.getPlan(plan.tracPlanId);
+    const details: PlanDetails = {
+      ...plan.details,
+      contacts: rk.contacts,
+      funds: rk.funds,
+      fees: rk.fees,
+      employeeCount: rk.participantCount,
+      planAssetsUsd: rk.planAssetsUsd,
+    };
+    return this.r.plans.update({ ...plan, details, updatedAt: this.now() });
+  }
+
+  /** Correct onboarding data. Only allowed before the plan is on the recordkeeper. */
+  updatePlanDetails(planId: string, patch: Partial<PlanDetails>, actor: string): Plan {
+    const plan = this.r.plans.require(planId);
+    if (plan.tracPlanId) throw new ValidationError('Plan is live on the recordkeeper; submit a maintenance request instead');
+    const next = this.r.plans.update({ ...plan, details: { ...plan.details, ...patch }, updatedAt: this.now() });
+    this.audit(actor, 'plan', planId, 'plan.corrected', { fields: Object.keys(patch) });
+    return next;
+  }
+
+  // ---------------------------------------------------------------- engine
+
+  /** Unblock tasks whose dependencies are done, run AUTO tasks, route human tasks, close the case. */
+  advance(caseId: string): void {
+    for (let guard = 0; guard < 100; guard++) {
+      const tasks = this.tasksFor(caseId);
+      const doneSteps = new Set(tasks.filter((t) => t.status === 'DONE' || t.status === 'SKIPPED').map((t) => t.stepId));
+      let progressed = false;
+
+      for (const t of tasks.filter((t) => t.status === 'BLOCKED' && t.dependsOn.every((d) => doneSteps.has(d)))) {
+        const step = this.kb.playbookFor(this.r.cases.require(caseId).type, this.r.cases.require(caseId).clientId).steps.find((s) => s.id === t.stepId);
+        this.save(t, { status: 'READY', readyAt: this.now(), dueAt: step?.slaHours ? addHours(this.now(), step.slaHours) : undefined }, 'system', 'ready');
+        progressed = true;
+      }
+
+      for (const t of this.tasksFor(caseId).filter((t) => t.status === 'READY' && t.mode === 'AUTO' && !t.exception)) {
+        this.runAuto(t);
+        progressed = true;
+      }
+      if (!progressed) break;
+    }
+    this.routeUnassigned(); // global: finished work may have freed capacity for other cases
+    this.checkCompletion(caseId);
+  }
+
+  private runAuto(task: Task): void {
+    try {
+      const outcome = this.exec.execute(this.contextFor(task, 'system'));
+      if (outcome.plan) this.r.plans.update({ ...outcome.plan, updatedAt: this.now() });
+      this.save(task, { status: 'DONE', result: outcome.result, completedAt: this.now() }, 'system', 'auto-completed', outcome.result);
+    } catch (e) {
+      const issues = e instanceof ActionError ? e.issues : [];
+      // Automation failed: hand the step to a person instead of stalling the case.
+      this.save(task, { exception: `${(e as Error).message}${issues.length ? `: ${issues.join('; ')}` : ''}` }, 'system', 'auto-failed', { issues });
+    }
+  }
+
+  private needsHuman(t: Task): boolean {
+    return t.mode !== 'AUTO' || !!t.exception;
+  }
+
+  openLoad(): Map<string, number> {
+    const load = new Map<string, number>();
+    for (const t of this.r.tasks.find((t) => OPEN.includes(t.status) && !!t.assigneeId)) {
+      load.set(t.assigneeId!, (load.get(t.assigneeId!) ?? 0) + 1);
+    }
+    return load;
+  }
+
+  /** Route every ready human task that has no owner (optionally only for one case). */
+  routeUnassigned(caseId?: string): number {
+    let routed = 0;
+    const users = this.users.list();
+    const pending = this.r.tasks.find((t) => t.status === 'READY' && !t.assigneeId && this.needsHuman(t) && (!caseId || t.caseId === caseId));
+    for (const t of pending) {
+      const decision = routeTask(t, users, this.openLoad());
+      if (decision.assigneeId) {
+        this.save(t, { assigneeId: decision.assigneeId }, 'router', 'assigned', { to: decision.assigneeId, reason: decision.reason });
+        routed++;
+      } else if (!t.history.some((h) => h.event === 'queued' && (h.detail as { reason?: string })?.reason === decision.reason)) {
+        this.save(t, {}, 'router', 'queued', { reason: decision.reason });
+      }
+    }
+    return routed;
+  }
+
+  private checkCompletion(caseId: string): void {
+    const kase = this.r.cases.require(caseId);
+    if (kase.status !== 'OPEN') return;
+    const tasks = this.tasksFor(caseId);
+    if (!tasks.every((t) => t.status === 'DONE' || t.status === 'SKIPPED')) return;
+    this.r.cases.update({ ...kase, status: 'COMPLETED', completedAt: this.now() });
+    const plan = this.r.plans.require(kase.planId);
+    if (kase.type === 'INSTALLATION') {
+      this.r.plans.update({ ...plan, status: 'ACTIVE', updatedAt: this.now() });
+      this.audit('system', 'plan', plan.id, 'plan.installation-complete', { tracPlanId: this.r.plans.require(plan.id).tracPlanId }, caseId);
+    }
+    if (kase.type === 'TERMINATION') {
+      this.r.plans.update({ ...plan, status: 'TERMINATED', updatedAt: this.now() });
+      this.audit('system', 'plan', plan.id, 'plan.terminated', undefined, caseId);
+    }
+    this.audit('system', 'case', caseId, 'case.completed', undefined, caseId);
+  }
+
+  // ---------------------------------------------------------------- user actions
+
+  private requireOwner(task: Task, userId: string): void {
+    if (task.assigneeId !== userId) throw new ValidationError(`Task ${task.id} is assigned to ${task.assigneeId ?? 'nobody'}, not ${userId}`);
+    if (!OPEN.includes(task.status)) throw new ValidationError(`Task ${task.id} is ${task.status}`);
+  }
+
+  startTask(taskId: string, userId: string): Task {
+    const t = this.r.tasks.require(taskId);
+    this.requireOwner(t, userId);
+    if (t.status === 'IN_PROGRESS') return t;
+    return this.save(t, { status: 'IN_PROGRESS', startedAt: this.now() }, userId, 'started');
+  }
+
+  /** Approve/execute a REVIEW step, confirm a MANUAL step, or resolve an exception. */
+  completeTask(taskId: string, userId: string, input: CompleteInput = {}): Task {
+    let t = this.r.tasks.require(taskId);
+    this.requireOwner(t, userId);
+    if (t.status === 'READY') t = this.startTask(taskId, userId);
+
+    if (input.override) {
+      if (!t.exception) throw new ValidationError('Override is only for steps in exception');
+      if (!input.notes?.trim()) throw new ValidationError('Override requires a justification in notes');
+      t = this.save(t, { status: 'DONE', completedAt: this.now(), result: { overridden: true, notes: input.notes } }, userId, 'overridden', { notes: input.notes, exception: t.exception });
+    } else if (t.mode === 'MANUAL' && t.action.type === 'none') {
+      t = this.save(t, { status: 'DONE', completedAt: this.now(), result: { notes: input.notes ?? '' } }, userId, 'confirmed', { notes: input.notes });
+    } else {
+      try {
+        const outcome = this.exec.execute(this.contextFor(t, userId), input.edits);
+        if (outcome.plan) this.r.plans.update({ ...outcome.plan, updatedAt: this.now() });
+        t = this.save(
+          t,
+          { status: 'DONE', completedAt: this.now(), result: outcome.result, draftEdited: outcome.draftEdited, exception: undefined },
+          userId,
+          'executed',
+          { result: outcome.result, draftEdited: outcome.draftEdited, notes: input.notes },
+        );
+      } catch (e) {
+        const issues = e instanceof ActionError ? e.issues : [];
+        this.save(t, { exception: `${(e as Error).message}${issues.length ? `: ${issues.join('; ')}` : ''}` }, userId, 'execution-failed', { issues });
+        throw e instanceof ActionError ? e : new ActionError((e as Error).message);
+      }
+    }
+    this.advance(t.caseId);
+    return this.r.tasks.require(taskId);
+  }
+
+  /** Move a task to a specific user, or back through the router (excluding the current owner). */
+  reassign(taskId: string, by: string, toUserId?: string): Task {
+    const t = this.r.tasks.require(taskId);
+    if (!OPEN.includes(t.status)) throw new ValidationError(`Task ${taskId} is ${t.status}`);
+    let target = toUserId;
+    if (target) {
+      const u = this.users.get(target);
+      if (!u?.active) throw new ValidationError(`User ${target} is not active`);
+      if (!u.skills.some((s) => s.skill === t.skill && s.level >= t.minSkillLevel)) throw new ValidationError(`${u.name} lacks ${t.skill} L${t.minSkillLevel}`);
+    } else {
+      target = routeTask(t, this.users.list(), this.openLoad(), t.assigneeId ? [t.assigneeId] : []).assigneeId;
+    }
+    return this.save(t, { assigneeId: target, status: 'READY', startedAt: undefined }, by, 'reassigned', { from: t.assigneeId, to: target ?? null });
+  }
+
+  cancelCase(caseId: string, by: string, reason: string): Case {
+    const kase = this.r.cases.require(caseId);
+    if (kase.status !== 'OPEN') throw new ValidationError(`Case is ${kase.status}`);
+    for (const t of this.tasksFor(caseId).filter((t) => t.status !== 'DONE')) this.save(t, { status: 'SKIPPED' }, by, 'cancelled');
+    const next = this.r.cases.update({ ...kase, status: 'CANCELLED', completedAt: this.now() });
+    const plan = this.r.plans.require(kase.planId);
+    if (kase.type === 'TERMINATION' && plan.status === 'TERMINATING') this.r.plans.update({ ...plan, status: 'ACTIVE' });
+    this.audit(by, 'case', caseId, 'case.cancelled', { reason }, caseId);
+    return next;
+  }
+
+  // ---------------------------------------------------------------- queries
+
+  tasksFor(caseId: string): Task[] {
+    return this.r.tasks.find((t) => t.caseId === caseId);
+  }
+
+  inbox(userId: string): Task[] {
+    return this.r.tasks
+      .find((t) => t.assigneeId === userId && OPEN.includes(t.status))
+      .sort((a, b) => (a.dueAt ?? '9').localeCompare(b.dueAt ?? '9'));
+  }
+
+  unassignedQueue(): Task[] {
+    return this.r.tasks.find((t) => t.status === 'READY' && !t.assigneeId && this.needsHuman(t));
+  }
+
+  contextFor(task: Task, actor: string): ActionContext {
+    const kase = this.r.cases.require(task.caseId);
+    const stepResults: Record<string, unknown> = {};
+    for (const t of this.tasksFor(task.caseId)) if (t.status === 'DONE') stepResults[t.stepId] = t.result;
+    return { task, kase, plan: this.r.plans.require(task.planId), stepResults, actor, today: this.clock.now() };
+  }
+
+  private save(task: Task, patch: Partial<Task>, by: string, event: string, detail?: unknown): Task {
+    const next: Task = { ...task, ...patch, history: [...task.history, { at: this.now(), by, event, detail }] };
+    this.r.tasks.update(next);
+    this.audit(by, 'task', task.id, `task.${event}`, { step: task.stepId, ...(detail && typeof detail === 'object' ? detail : {}) }, task.caseId);
+    return next;
+  }
+
+  allUsers(): User[] {
+    return this.users.list();
+  }
+}

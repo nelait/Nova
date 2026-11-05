@@ -1,0 +1,14 @@
+Subject: Service provider fee disclosure (ERISA 408(b)(2)) – {{plan.details.sponsorName}}
+
+Dear {{recipient.name}},
+
+As a covered service provider to the {{plan.details.sponsorName}} {{plan.details.planType}} plan, we are disclosing the compensation we expect to receive for recordkeeping services:
+
+  - Asset-based recordkeeping fee: {{fees.recordkeepingBps}} basis points per year
+  - Per-participant fee: ${{fees.perParticipantUsd}} per participant per year
+  - Deconversion fee (if the plan leaves the platform): ${{fees.terminationBaseUsd}}
+
+Please contact us with any questions about these fees.
+
+Kind regards,
+Plan Services Team

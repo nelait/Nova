@@ -1,0 +1,14 @@
+Subject: Confirmation of plan termination – {{plan.details.sponsorName}}
+
+Dear {{recipient.name}},
+
+We confirm that recordkeeping services for the {{plan.details.sponsorName}} plan end effective {{request.effectiveDate}}. Assets will be transferred to {{request.successorProvider}}.
+
+Final fees:
+  - Deconversion fee: ${{termination.baseFeeUsd}}
+  - Participant fee ({{termination.participants}} participants): ${{termination.participantFeeUsd}}
+  - Prorated asset-based fee ({{termination.prorationDays}} days): ${{termination.assetFeeUsd}}
+  - Total: ${{termination.totalUsd}}
+
+Kind regards,
+Plan Services Team

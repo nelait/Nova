@@ -1,0 +1,13 @@
+Subject: Upcoming change to investment options – {{plan.details.sponsorName}} plan
+
+Dear {{recipient.name}},
+
+The investment lineup of the {{plan.details.sponsorName}} plan will change effective {{request.effectiveDate}}. Please distribute the attached participant notice at least 30 days before that date.
+
+New lineup:
+{{request.lineupText}}
+
+Balances in removed funds will be mapped as described in the participant notice.
+
+Kind regards,
+Plan Services Team

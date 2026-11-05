@@ -1,0 +1,15 @@
+Subject: Welcome to your {{plan.details.planType}} plan service team – {{plan.details.sponsorName}}
+
+Dear {{recipient.name}},
+
+Welcome! We are setting up the {{plan.details.sponsorName}} {{plan.details.planType}} plan, with a target effective date of {{plan.details.effectiveDate}}.
+
+What happens next:
+  1. We finish installing your plan on our recordkeeping platform.
+  2. Your payroll contact will receive contribution file specifications.
+  3. Participants will receive enrollment materials before the effective date.
+
+Your plan reference: {{plan.id}}
+
+Kind regards,
+Plan Services Team

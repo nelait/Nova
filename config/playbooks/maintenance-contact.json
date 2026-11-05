@@ -1,0 +1,49 @@
+{
+  "id": "maintenance-contact",
+  "version": 1,
+  "caseType": "MAINTENANCE_CONTACT",
+  "name": "Change plan contact",
+  "description": "Add or replace a plan contact (e.g. new plan administrator).",
+  "steps": [
+    {
+      "id": "validate-request",
+      "name": "Validate contact change request",
+      "skill": "MAINTENANCE",
+      "mode": "AUTO",
+      "action": { "type": "compliance.check", "params": { "ruleset": "contact-change" } },
+      "slaHours": 4,
+      "guidance": "The request must include the role, name and email of the new contact."
+    },
+    {
+      "id": "verify-authority",
+      "name": "Verify request came from an authorized contact",
+      "skill": "COMPLIANCE",
+      "mode": "MANUAL",
+      "action": { "type": "none" },
+      "dependsOn": ["validate-request"],
+      "slaHours": 24,
+      "guidance": "Contact changes are a common fraud vector. Call back the current plan administrator using the number on file, not one supplied in the request.",
+      "checklist": ["Call-back to number on file completed", "Requester is a current authorized contact"],
+      "regulatoryRef": "Firm fraud-prevention policy"
+    },
+    {
+      "id": "apply-contact",
+      "name": "Update contact on recordkeeper",
+      "skill": "MAINTENANCE",
+      "mode": "AUTO",
+      "action": { "type": "contacts.upsert", "params": { "source": "request" } },
+      "dependsOn": ["verify-authority"],
+      "guidance": "Replaces the contact for the given role and syncs to the recordkeeper."
+    },
+    {
+      "id": "confirm-change",
+      "name": "Confirm change to old and new contact",
+      "skill": "MAINTENANCE",
+      "mode": "REVIEW",
+      "action": { "type": "email.send", "params": { "template": "contact-change-confirmation", "to": ["PLAN_ADMINISTRATOR"], "ccPrevious": true } },
+      "dependsOn": ["apply-contact"],
+      "slaHours": 24,
+      "guidance": "Notify both the new and the previous contact so an unauthorized change is noticed quickly."
+    }
+  ]
+}

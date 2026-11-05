@@ -1,0 +1,86 @@
+{
+  "id": "installation",
+  "version": 1,
+  "caseType": "INSTALLATION",
+  "name": "New plan installation",
+  "description": "Take a newly onboarded sponsor from intake to 'Installation Complete' on the recordkeeper.",
+  "steps": [
+    {
+      "id": "validate-intake",
+      "name": "Validate onboarding data",
+      "skill": "PLAN_SETUP",
+      "mode": "AUTO",
+      "action": { "type": "compliance.check", "params": { "ruleset": "installation" } },
+      "slaHours": 4,
+      "guidance": "Every required plan attribute must be present and well-formed before any outbound communication. If this check fails, it is routed to a plan setup specialist to fix the data with the sponsor.",
+      "checklist": ["EIN format NN-NNNNNNN", "At least one plan administrator with email", "Fund lineup has exactly one QDIA", "Fee schedule present"]
+    },
+    {
+      "id": "verify-sponsor",
+      "name": "Verify plan sponsor and authorized signer",
+      "skill": "COMPLIANCE",
+      "mode": "MANUAL",
+      "action": { "type": "none" },
+      "dependsOn": ["validate-intake"],
+      "slaHours": 24,
+      "guidance": "Confirm the sponsor's legal entity and EIN, and that the person who signed the service agreement is authorized to bind the plan.",
+      "checklist": ["EIN matches IRS letter / W-9", "Signed service agreement on file", "Authorized signer confirmed (board resolution or officer)"],
+      "regulatoryRef": "Firm KYC / CIP policy"
+    },
+    {
+      "id": "setup-contacts",
+      "name": "Create plan contacts",
+      "skill": "PLAN_SETUP",
+      "mode": "AUTO",
+      "action": { "type": "contacts.upsert", "params": { "source": "plan" } },
+      "dependsOn": ["validate-intake"],
+      "slaHours": 4,
+      "guidance": "Create the plan administrator, payroll and trustee contacts so notices and file feeds route to the right people."
+    },
+    {
+      "id": "review-fund-lineup",
+      "name": "Review fund lineup and QDIA",
+      "skill": "INVESTMENTS",
+      "mode": "REVIEW",
+      "action": { "type": "funds.apply", "params": { "source": "plan" } },
+      "dependsOn": ["validate-intake"],
+      "slaHours": 24,
+      "guidance": "Check every fund is available on the platform and share classes are correct. The default investment must meet QDIA requirements so participants who do not elect are protected.",
+      "checklist": ["All tickers available on platform", "Exactly one QDIA (typically target-date series)", "No closed or restricted share classes"],
+      "regulatoryRef": "ERISA 404(c)(5) / 29 CFR 2550.404c-5 (QDIA)"
+    },
+    {
+      "id": "fee-disclosure",
+      "name": "Send 408(b)(2) service provider fee disclosure",
+      "skill": "COMPLIANCE",
+      "mode": "REVIEW",
+      "action": { "type": "email.send", "params": { "template": "fee-disclosure", "to": ["PLAN_ADMINISTRATOR"] } },
+      "dependsOn": ["review-fund-lineup"],
+      "slaHours": 24,
+      "guidance": "The responsible plan fiduciary must receive the covered service provider's compensation disclosure reasonably in advance of the contract. Review the drafted disclosure for accuracy before sending.",
+      "regulatoryRef": "ERISA 408(b)(2)"
+    },
+    {
+      "id": "welcome-email",
+      "name": "Send welcome email to plan administrator",
+      "skill": "PLAN_SETUP",
+      "mode": "REVIEW",
+      "action": { "type": "email.send", "params": { "template": "welcome", "to": ["PLAN_ADMINISTRATOR"], "cc": ["PAYROLL"] } },
+      "dependsOn": ["setup-contacts", "verify-sponsor"],
+      "slaHours": 24,
+      "guidance": "Introduce the service team, next steps and key dates. Personalise if the sponsor has special instructions."
+    },
+    {
+      "id": "trac-install",
+      "name": "Install plan on recordkeeper (TRAC)",
+      "skill": "PLAN_SETUP",
+      "minSkillLevel": 2,
+      "mode": "REVIEW",
+      "action": { "type": "trac.installPlan" },
+      "dependsOn": ["setup-contacts", "verify-sponsor", "review-fund-lineup", "fee-disclosure", "welcome-email"],
+      "slaHours": 8,
+      "guidance": "Final review of the record sent to the recordkeeper. After this succeeds the recordkeeper is the system of record and the plan is 'Installation Complete'.",
+      "checklist": ["Plan details match signed agreement", "Fund lineup matches reviewed lineup", "Effective date confirmed"]
+    }
+  ]
+}

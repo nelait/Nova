@@ -1,0 +1,10 @@
+Subject: Plan contact updated – {{plan.details.sponsorName}}
+
+Dear {{recipient.name}},
+
+As requested, the {{request.contact.role}} contact for the {{plan.details.sponsorName}} plan has been updated to {{request.contact.name}} ({{request.contact.email}}).
+
+If you did not request this change, please call us immediately using the number on your service agreement.
+
+Kind regards,
+Plan Services Team

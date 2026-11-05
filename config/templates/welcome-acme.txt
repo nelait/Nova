@@ -1,0 +1,11 @@
+Subject: Welcome aboard, {{plan.details.sponsorName}}! Your retirement plan team
+
+Hi {{recipient.name}},
+
+Thanks for choosing us for the {{plan.details.sponsorName}} {{plan.details.planType}}. Your dedicated relationship manager will call you this week to schedule the kickoff session.
+
+Target effective date: {{plan.details.effectiveDate}}
+Plan reference: {{plan.id}}
+
+Cheers,
+Plan Services Team

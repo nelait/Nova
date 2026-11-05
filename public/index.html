@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plan Ops Hub</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --ink: #1b1f24; --muted: #5d6673; --line: #dfe3e8;
+    --accent: #1f5fbf; --accent-ink: #fff; --ok: #1d7a46; --warn: #a15c00; --bad: #b42318;
+    --chip: #eef2f7; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111418; --panel: #1a1e24; --ink: #e6e9ee; --muted: #9aa4b2; --line: #2c323b;
+      --accent: #5b9bff; --accent-ink: #0b1220; --ok: #4cc283; --warn: #f0a742; --bad: #ff6b5e; --chip: #242a33; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  nav { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+  nav button { background: none; border: 0; padding: 6px 10px; border-radius: 6px; color: var(--muted); cursor: pointer; font: inherit; }
+  nav button.active { background: var(--chip); color: var(--ink); font-weight: 600; }
+  main { padding: 16px; max-width: 1280px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .grid2 { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 16px; align-items: start; }
+  .grid2 > * { min-width: 0; } .panel { overflow-wrap: break-word; } td:last-child { overflow-wrap: anywhere; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  h2 { font-size: 15px; margin: 0 0 10px; } h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .item { padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+  .item:hover, .item.sel { border-color: var(--accent); }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; margin-right: 4px; }
+  .chip.AUTO { color: var(--ok); } .chip.REVIEW { color: var(--accent); } .chip.MANUAL { color: var(--warn); }
+  .chip.DONE, .chip.COMPLETED, .chip.ACTIVE { color: var(--ok); } .chip.BLOCKED, .chip.SKIPPED, .chip.CANCELLED, .chip.TERMINATED { color: var(--muted); }
+  .chip.exception { color: var(--bad); font-weight: 600; }
+  .alert { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--chip); margin: 6px 0; border-radius: 4px; }
+  .alert.bad { border-color: var(--bad); }
+  button.btn { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit; font-weight: 600; }
+  button.btn.secondary { background: var(--chip); color: var(--ink); }
+  button.btn.danger { background: var(--bad); color: #fff; }
+  input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }
+  textarea { font-family: var(--mono); font-size: 12.5px; }
+  label { display: block; margin: 8px 0 4px; font-weight: 600; font-size: 12.5px; }
+  pre { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); padding: 8px; border-radius: 6px; overflow: auto; max-height: 320px; margin: 0; white-space: pre-wrap; }
+  table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1; min-width: 140px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .toast { position: fixed; bottom: 16px; right: 16px; left: 16px; max-width: 480px; margin-left: auto; padding: 10px 14px; border-radius: 8px; background: var(--ink); color: var(--bg); display: none; z-index: 5; }
+  .steps { display: flex; flex-direction: column; gap: 4px; }
+  .step { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  ul.check { padding-left: 0; list-style: none; margin: 0; } ul.check li { margin: 3px 0; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; } .kpi b { font-size: 22px; display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Plan Ops Hub</h1>
+  <nav id="tabs"></nav>
+  <div style="min-width:200px"><select id="userSel" title="Acting user"></select></div>
+</header>
+<main id="view"></main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const state = { tab: 'inbox', user: null, selTask: null, selCase: null };
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, { method: opts.method ?? 'GET', headers: { 'content-type': 'application/json', 'x-user-id': state.user ?? 'anonymous' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error + (data.issues?.length ? '\n• ' + data.issues.join('\n• ') : ''));
+  return data;
+}
+function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; t.style.background = bad ? 'var(--bad)' : ''; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), bad ? 7000 : 3000); }
+async function guarded(fn) { try { await fn(); } catch (e) { toast(e.message, true); } }
+
+const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
+function renderTabs() { $('#tabs').innerHTML = Object.entries(TABS).map(([k, v]) => `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${v}</button>`).join(''); }
+$('#tabs').onclick = (e) => { const k = e.target.dataset.tab; if (k) { state.tab = k; renderTabs(); render(); } };
+$('#userSel').onchange = (e) => { state.user = e.target.value; state.selTask = null; try { localStorage.setItem('planops.user', state.user); } catch {} render(); };
+
+const fmtDate = (s) => (s ? s.slice(0, 16).replace('T', ' ') : '');
+const statusChip = (t) => t.exception ? '<span class="chip exception">exception</span>' : `<span class="chip ${t.status}">${t.status}</span>`;
+
+// ---------------------------------------------------------------- inbox
+async function renderInbox(v) {
+  const tasks = await api('/inbox/' + state.user);
+  v.innerHTML = `<div class="grid2"><div class="panel"><h2>Inbox (${tasks.length})</h2><div id="list"></div></div><div class="panel" id="detail"><p class="muted">Select a work item.</p></div></div>`;
+  $('#list').innerHTML = tasks.length ? tasks.map((t) => `<div class="item ${state.selTask === t.id ? 'sel' : ''}" data-id="${t.id}">
+      <div><b>${esc(t.name)}</b></div>
+      <div class="small muted">${esc(t.sponsorName)} · ${t.caseType}</div>
+      <div class="small" style="margin-top:4px"><span class="chip ${t.mode}">${t.mode}</span>${statusChip(t)}${t.dueAt ? `<span class="muted">due ${fmtDate(t.dueAt)}</span>` : ''}</div></div>`).join('')
+    : '<p class="muted">Nothing assigned to you. Submit a request under <b>New request</b>, or switch user.</p>';
+  $('#list').onclick = (e) => { const it = e.target.closest('.item'); if (it) { state.selTask = it.dataset.id; renderInbox(v); } };
+  if (state.selTask && tasks.some((t) => t.id === state.selTask)) renderTaskDetail($('#detail'), state.selTask);
+}
+
+async function renderTaskDetail(el, taskId) {
+  const g = await api(`/tasks/${taskId}/guidance`);
+  const p = g.prepared;
+  let work = '';
+  if (p?.kind === 'email') {
+    work = `<h3>Drafted email (template: ${esc(p.template)})</h3>
+      <div class="small"><b>To:</b> ${esc(p.to.join(', ') || '—')} ${p.cc.length ? `&nbsp; <b>Cc:</b> ${esc(p.cc.join(', '))}` : ''}</div>
+      <label>Subject</label><input id="subj" value="${esc(p.subject)}" />
+      <label>Body</label><textarea id="body" rows="14">${esc(p.body)}</textarea>`;
+  } else if (p?.kind === 'system-update') {
+    work = `<h3>Will ${esc(p.operation)} on ${esc(p.target)}</h3><pre>${esc(JSON.stringify(p.payload, null, 2))}</pre>`;
+  } else if (p?.kind === 'calculation') {
+    const r = p.result;
+    work = `<h3>Calculation</h3><table><tr><td>Deconversion fee</td><td>$${r.baseFeeUsd}</td></tr><tr><td>Participant fee (${r.participants})</td><td>$${r.participantFeeUsd}</td></tr>
+      <tr><td>Prorated asset fee ($${r.planAssetsUsd.toLocaleString()})</td><td>$${r.assetFeeUsd}</td></tr><tr><th>Total</th><th>$${r.totalUsd}</th></tr></table><p class="small muted">${esc(r.basis)}</p>`;
+  } else if (p?.kind === 'check') {
+    work = `<h3>Validation</h3>${p.issues.length ? p.issues.map((i) => `<div class="alert bad">${esc(i)}</div>`).join('') : '<p>All checks pass.</p>'}`;
+  }
+  el.innerHTML = `<h2>${esc(g.headline)}</h2>
+    <div><span class="chip ${g.mode}">${g.mode}</span><span class="small muted">${esc(g.modeExplanation)}</span></div>
+    ${g.exception ? `<div class="alert bad"><b>Exception:</b> ${esc(g.exception)}</div>` : ''}
+    ${g.alerts.map((a) => `<div class="alert">${esc(a)}</div>`).join('')}
+    <h3>Guidance</h3><p>${esc(g.guidance)}</p>
+    ${g.regulatoryRef ? `<p class="small"><b>Reference:</b> ${esc(g.regulatoryRef)}</p>` : ''}
+    ${g.checklist.length ? `<h3>Checklist</h3><ul class="check">${g.checklist.map((c, i) => `<li><label style="display:inline;font-weight:400"><input type="checkbox" style="width:auto" data-ck="${i}"> ${esc(c)}</label></li>`).join('')}</ul>` : ''}
+    ${work}${g.prepareError ? `<div class="alert bad">${esc(g.prepareError)}</div>` : ''}
+    <label>Notes</label><input id="notes" placeholder="What you checked / why" />
+    <div class="actions">
+      ${g.allowedActions.includes('approve') ? '<button class="btn" data-act="approve">Approve &amp; execute</button>' : ''}
+      ${g.allowedActions.includes('confirm') ? '<button class="btn" data-act="confirm">Confirm done</button>' : ''}
+      ${g.allowedActions.includes('retry') ? '<button class="btn" data-act="retry">Retry</button>' : ''}
+      ${g.allowedActions.includes('override') ? '<button class="btn danger" data-act="override">Override (with justification)</button>' : ''}
+      <button class="btn secondary" data-act="reassign">Reassign</button>
+    </div>`;
+  el.querySelector('.actions').onclick = (e) => guarded(async () => {
+    const act = e.target.dataset.act; if (!act) return;
+    const notes = $('#notes').value;
+    if (act === 'reassign') { const t = await api(`/tasks/${taskId}/reassign`, { method: 'POST', body: {} }); toast(t.assigneeId ? `Reassigned to ${t.assigneeId}` : 'Returned to queue'); state.selTask = null; return render(); }
+    const boxes = [...el.querySelectorAll('[data-ck]')];
+    if ((act === 'confirm' || act === 'approve') && boxes.some((b) => !b.checked)) throw new Error('Complete the checklist first');
+    const body = { notes, override: act === 'override' };
+    if ($('#subj')) body.edits = { subject: $('#subj').value, body: $('#body').value };
+    await api(`/tasks/${taskId}/complete`, { method: 'POST', body });
+    toast('Done'); state.selTask = null; render();
+  });
+}
+
+// ---------------------------------------------------------------- intake
+const SAMPLE_DETAILS = {
+  sponsorName: 'Northwind Analytics Inc.', ein: '45-1234567', employeeCount: 320, planType: '401K', effectiveDate: '2027-01-01', planAssetsUsd: 18500000,
+  contacts: [{ role: 'PLAN_ADMINISTRATOR', name: 'Jane Doe', email: 'jane@northwind.example' }, { role: 'PAYROLL', name: 'Raj Patel', email: 'payroll@northwind.example' }, { role: 'TRUSTEE', name: 'Lee Wong', email: 'trustee@northwind.example' }],
+  funds: [{ ticker: 'VFIAX', name: 'Vanguard 500 Index Admiral' }, { ticker: 'VBTLX', name: 'Vanguard Total Bond Market Index Admiral' }, { ticker: 'VTTSX', name: 'Vanguard Target Retirement 2060', qdia: true }],
+  fees: { recordkeepingBps: 8, perParticipantUsd: 40, terminationBaseUsd: 2500 },
+};
+const SAMPLES = {
+  INSTALLATION: { details: SAMPLE_DETAILS },
+  MAINTENANCE_CONTACT: { contact: { role: 'PLAN_ADMINISTRATOR', name: 'Omar Haddad', email: 'omar@northwind.example' } },
+  MAINTENANCE_FUNDS: { effectiveDate: '2027-02-01', funds: [{ ticker: 'FXAIX', name: 'Fidelity 500 Index' }, { ticker: 'VBTLX', name: 'Vanguard Total Bond Market Index Admiral' }, { ticker: 'VTTSX', name: 'Vanguard Target Retirement 2060', qdia: true }] },
+  MAINTENANCE_FEES: { fees: { recordkeepingBps: 6, perParticipantUsd: 35, terminationBaseUsd: 2500 } },
+  TERMINATION: { reason: 'Consolidating with parent company provider', successorProvider: 'Other Recordkeeper Co', effectiveDate: '2027-03-31', blackoutStart: '2027-03-25', blackoutEnd: '2027-04-20' },
+};
+const PAPER_SAMPLE = `Sponsor Name: Bluebird Bakery LLC\nEIN: 98-7654321\nEmployees: 1,200\nPlan Type: 401(k)\nEffective Date: 2027-02-01\nPlan Assets: $4,500,000\nPlan Administrator: Ana Ruiz <ana@bluebird.example>\nPayroll: Tom Fry <payroll@bluebird.example>\nFund: FXAIX | Fidelity 500 Index\nFund: FDEWX | Fidelity Freedom 2055 | QDIA`;
+
+async function renderIntake(v) {
+  const [plans, clients] = await Promise.all([api('/plans'), api('/clients')]);
+  const active = plans.filter((p) => p.status === 'ACTIVE');
+  v.innerHTML = `<div class="panel" style="max-width:860px"><h2>New request</h2>
+    <div class="row">
+      <div><label>Request type</label><select id="ctype">${Object.keys(SAMPLES).map((k) => `<option>${k}</option>`).join('')}</select></div>
+      <div><label>Channel</label><select id="chan"><option>DIGITAL</option><option>MANUAL</option><option>PAPER</option></select></div>
+      <div id="clientBox"><label>Client service model</label><select id="client">${clients.map((c) => `<option value="${c.clientId}">${esc(c.displayName)}</option>`).join('')}</select></div>
+      <div id="planBox"><label>Plan</label><select id="plan">${active.map((p) => `<option value="${p.id}">${esc(p.details.sponsorName)} (${p.tracPlanId})</option>`).join('') || '<option value="">No active plans yet</option>'}</select></div>
+    </div>
+    <label id="dataLbl">Request data (JSON)</label><textarea id="data" rows="18"></textarea>
+    <div class="actions"><button class="btn" id="submit">Submit</button></div></div>`;
+  const sync = () => {
+    const t = $('#ctype').value, paper = $('#chan').value === 'PAPER';
+    $('#planBox').style.display = t === 'INSTALLATION' ? 'none' : '';
+    $('#clientBox').style.display = t === 'INSTALLATION' ? '' : 'none';
+    $('#dataLbl').textContent = paper ? 'Paper form text (OCR output)' : 'Request data (JSON)';
+    $('#data').value = paper ? (t === 'INSTALLATION' ? PAPER_SAMPLE : Object.entries(SAMPLES[t]).filter(([, v]) => typeof v !== 'object').map(([k, v]) => `${k}: ${v}`).join('\n')) : JSON.stringify(SAMPLES[t], null, 2);
+  };
+  $('#ctype').onchange = sync; $('#chan').onchange = sync; sync();
+  $('#submit').onclick = () => guarded(async () => {
+    const t = $('#ctype').value, paper = $('#chan').value === 'PAPER';
+    const body = { caseType: t, channel: $('#chan').value, clientId: $('#client').value, planId: t === 'INSTALLATION' ? undefined : $('#plan').value };
+    if (paper) body.documentText = $('#data').value; else body.data = JSON.parse($('#data').value);
+    const r = await api('/intake', { method: 'POST', body });
+    toast(`Case ${r.case.id} opened with ${r.tasks.length} tasks`);
+    state.tab = 'cases'; state.selCase = r.case.id; renderTabs(); render();
+  });
+}
+
+// ---------------------------------------------------------------- cases
+async function renderCases(v) {
+  const cases = await api('/cases');
+  v.innerHTML = `<div class="grid2"><div class="panel"><h2>Cases (${cases.length})</h2><div id="list"></div></div><div class="panel" id="detail"><p class="muted">Select a case.</p></div></div>`;
+  $('#list').innerHTML = cases.map((c) => `<div class="item ${state.selCase === c.id ? 'sel' : ''}" data-id="${c.id}"><b>${esc(c.sponsorName)}</b>
+    <div class="small muted">${c.type} · ${c.channel} · ${fmtDate(c.createdAt)}</div><div class="small"><span class="chip ${c.status}">${c.status}</span>${c.progress.done}/${c.progress.total} steps</div></div>`).join('') || '<p class="muted">No cases yet.</p>';
+  $('#list').onclick = (e) => { const it = e.target.closest('.item'); if (it) { state.selCase = it.dataset.id; renderCases(v); } };
+  if (!state.selCase) return;
+  const d = await api('/cases/' + state.selCase);
+  $('#detail').innerHTML = `<h2>${esc(d.plan.details.sponsorName)} — ${d.case.type}</h2>
+    <div class="small muted">Case ${d.case.id} · playbook ${d.case.playbookId} v${d.case.playbookVersion} · plan <span class="chip ${d.plan.status}">${d.plan.status}</span>${d.plan.tracPlanId ? ' · ' + d.plan.tracPlanId : ''}</div>
+    <h3>Steps</h3><div class="steps">${d.tasks.map((t) => `<div class="step"><div><b>${esc(t.name)}</b><div class="small muted">${t.skill}${t.minSkillLevel > 1 ? ' L' + t.minSkillLevel + '+' : ''} · ${t.assigneeId ?? (t.status === 'READY' && t.mode !== 'AUTO' ? 'unassigned queue' : '—')}</div>
+      ${t.exception ? `<div class="small" style="color:var(--bad)">${esc(t.exception)}</div>` : ''}</div><div><span class="chip ${t.mode}">${t.mode}</span>${statusChip(t)}</div></div>`).join('')}</div>
+    ${d.case.status === 'OPEN' ? '<div class="actions"><button class="btn secondary" id="cancel">Cancel case</button></div>' : ''}
+    <h3>Audit trail</h3><div class="scroll"><table><tr><th>When</th><th>Who</th><th>Event</th><th>Detail</th></tr>${d.audit.map((a) => `<tr><td class="small">${fmtDate(a.at)}</td><td class="small">${esc(a.actor)}</td><td class="small">${esc(a.event)}</td><td class="small muted">${esc(a.detail ? JSON.stringify(a.detail).slice(0, 140) : '')}</td></tr>`).join('')}</table></div>`;
+  $('#cancel')?.addEventListener('click', () => guarded(async () => { const reason = prompt('Reason for cancelling?'); if (!reason) return; await api(`/cases/${state.selCase}/cancel`, { method: 'POST', body: { reason } }); render(); }));
+}
+
+// ---------------------------------------------------------------- team
+const SCIM_SAMPLE = { source: 'okta', Resources: [{ id: '901', userName: 'kai@planops.example', displayName: 'Kai Brown', emails: [{ value: 'kai@planops.example', primary: true }], groups: [{ display: 'skill:INVESTMENTS:2' }, { display: 'skill:TERMINATIONS:2' }] }] };
+async function renderTeam(v) {
+  const [users, queue] = await Promise.all([api('/users'), api('/queue/unassigned')]);
+  v.innerHTML = `<div class="panel"><h2>Users and skills</h2><div class="scroll"><table><tr><th>User</th><th>Skills</th><th>Load</th><th>Source</th><th>Active</th></tr>
+    ${users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="small muted">${u.id}</div></td><td>${u.skills.map((s) => `<span class="chip">${s.skill} L${s.level}</span>`).join('')}</td><td>${u.openTasks}/${u.capacity}</td><td class="small">${esc(u.source)}</td>
+      <td><input type="checkbox" style="width:auto" data-u="${u.id}" ${u.active ? 'checked' : ''}></td></tr>`).join('')}</table></div>
+    <h3>Unassigned queue (${queue.length})</h3>${queue.map((t) => `<div class="small">${esc(t.name)} — needs ${t.skill} L${t.minSkillLevel}+ ${t.exception ? '<span class="chip exception">exception</span>' : ''}</div>`).join('') || '<p class="small muted">Empty.</p>'}
+    <h3>Import users from identity provider (SCIM)</h3><p class="small muted">Skills are IdP groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>. Importing re-runs routing for the unassigned queue.</p>
+    <textarea id="scim" rows="10">${esc(JSON.stringify(SCIM_SAMPLE, null, 2))}</textarea><div class="actions"><button class="btn" id="imp">Import</button></div></div>`;
+  v.querySelector('table').onchange = (e) => guarded(async () => { const id = e.target.dataset.u; if (id) { await api(`/users/${id}/active`, { method: 'POST', body: { active: e.target.checked } }); render(); } });
+  $('#imp').onclick = () => guarded(async () => { await api('/users/import/scim', { method: 'POST', body: JSON.parse($('#scim').value) }); toast('Imported'); await loadUsers(); render(); });
+}
+
+// ---------------------------------------------------------------- trac / outbox / insights
+async function renderTrac(v) {
+  const plans = await api('/trac/plans');
+  v.innerHTML = `<div class="panel"><h2>Recordkeeper (TRAC mock): system of record</h2>
+    <p class="small muted">Plans appear here only when the installation's final step succeeds. Maintenance and termination cases read from and write to these records.</p>
+    <div class="actions"><button class="btn secondary" id="outage">Simulate outage on next write</button></div>
+    <div class="scroll"><table><tr><th>TRAC id</th><th>Sponsor</th><th>Status</th><th>Version</th><th>Funds</th><th>Plan admin</th><th>Updated</th></tr>
+    ${plans.map((p) => `<tr><td>${p.id}</td><td>${esc(p.sponsorName)}<div class="small muted">${p.ein}</div></td><td><span class="chip ${p.status}">${p.status}</span>${p.successorProvider ? `<div class="small muted">→ ${esc(p.successorProvider)}</div>` : ''}</td><td>v${p.version}</td>
+      <td class="small">${p.funds.map((f) => esc(f.ticker) + (f.qdia ? '*' : '')).join(', ')}</td><td class="small">${esc(p.contacts.find((c) => c.role === 'PLAN_ADMINISTRATOR')?.email)}</td><td class="small">${fmtDate(p.updatedAt)}</td></tr>`).join('')}</table></div></div>`;
+  $('#outage').onclick = () => guarded(async () => { await api('/trac/simulate-outage', { method: 'POST', body: {} }); toast('Next TRAC write will fail'); });
+}
+async function renderOutbox(v) {
+  const mails = await api('/outbox');
+  v.innerHTML = `<div class="panel"><h2>Outbox (${mails.length})</h2>${mails.map((m) => `<div class="item" style="cursor:default"><b>${esc(m.subject)}</b>
+    <div class="small muted">to ${esc(m.to.join(', '))}${m.cc.length ? ' · cc ' + esc(m.cc.join(', ')) : ''} · by ${esc(m.sentBy)} · ${fmtDate(m.sentAt)}</div><pre style="margin-top:6px">${esc(m.body)}</pre></div>`).join('') || '<p class="muted">No emails sent yet.</p>'}</div>`;
+}
+async function renderInsights(v) {
+  const i = await api('/insights');
+  v.innerHTML = `<div class="kpis"><div class="kpi"><b>${i.cases.open}</b><span class="muted small">open cases</span></div><div class="kpi"><b>${i.cases.completed}</b><span class="muted small">completed</span></div>
+    <div class="kpi"><b>${i.cases.avgCycleHours ?? '—'}</b><span class="muted small">avg cycle (hours)</span></div><div class="kpi"><b>${Object.values(i.backlogBySkill).reduce((a, b) => a + b, 0)}</b><span class="muted small">unrouted tasks</span></div></div>
+    <div class="panel"><h2>Suggested process improvements</h2><p class="small muted">Suggestions only. A process owner decides whether to change a playbook or template.</p>
+    ${i.suggestions.map((s) => `<div class="alert"><span class="chip">${s.kind}</span><b>${esc(s.target)}</b>: ${esc(s.message)}</div>`).join('') || '<p class="muted small">Not enough history yet (needs about 5 completions per step).</p>'}
+    <h3>Step performance</h3><div class="scroll"><table><tr><th>Case type</th><th>Step</th><th>Mode</th><th>Done</th><th>Avg handle (min)</th><th>Auto failures</th><th>Overrides</th><th>Draft edit rate</th><th>Overdue</th></tr>
+    ${i.steps.map((s) => `<tr><td class="small">${s.caseType}</td><td>${esc(s.name)}</td><td><span class="chip ${s.mode}">${s.mode}</span></td><td>${s.completed}</td><td>${s.avgHandleMinutes ?? '—'}</td><td>${s.autoFailures}</td><td>${s.overrides}</td>
+      <td>${s.draftEditRate === null ? '—' : Math.round(s.draftEditRate * 100) + '%'}</td><td>${s.overdueOpen}</td></tr>`).join('')}</table></div></div>`;
+}
+
+const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
+async function render() { const v = $('#view'); await guarded(() => VIEWS[state.tab](v)); loadUsers().catch(() => {}); }
+
+async function loadUsers() {
+  const users = await api('/users');
+  let saved = null; try { saved = localStorage.getItem('planops.user'); } catch {}
+  state.user = state.user ?? (users.some((u) => u.id === saved) ? saved : users[0]?.id);
+  $('#userSel').innerHTML = users.filter((u) => u.active).map((u) => `<option value="${u.id}" ${u.id === state.user ? 'selected' : ''}>${esc(u.name)} (${u.openTasks})</option>`).join('');
+}
+setInterval(() => { if (state.tab !== 'intake' && state.tab !== 'team' && !document.activeElement?.matches('input,textarea')) loadUsers(); }, 5000);
+loadUsers().then(() => { renderTabs(); render(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "id": "maintenance-fees",
+  "version": 1,
+  "caseType": "MAINTENANCE_FEES",
+  "name": "Change fee schedule",
+  "description": "Update the plan's recordkeeping fees.",
+  "steps": [
+    {
+      "id": "validate-request",
+      "name": "Validate fee change request",
+      "skill": "MAINTENANCE",
+      "mode": "AUTO",
+      "action": { "type": "compliance.check", "params": { "ruleset": "fee-change" } },
+      "guidance": "The request must contain a complete fee schedule."
+    },
+    {
+      "id": "fee-disclosure",
+      "name": "Send updated 408(b)(2) disclosure",
+      "skill": "COMPLIANCE",
+      "mode": "REVIEW",
+      "action": { "type": "email.send", "params": { "template": "fee-disclosure", "to": ["PLAN_ADMINISTRATOR"], "useRequestFees": true } },
+      "dependsOn": ["validate-request"],
+      "slaHours": 24,
+      "guidance": "Changes to disclosed compensation must be disclosed as soon as practicable, and no later than 60 days after the provider learns of the change.",
+      "regulatoryRef": "ERISA 408(b)(2) – change disclosure within 60 days"
+    },
+    {
+      "id": "apply-fees",
+      "name": "Apply new fee schedule on recordkeeper",
+      "skill": "MAINTENANCE",
+      "mode": "REVIEW",
+      "action": { "type": "fees.apply" },
+      "dependsOn": ["fee-disclosure"],
+      "guidance": "Submits the new fee schedule to the recordkeeper."
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import type { CaseType, ClientConfig, Playbook, PlaybookStep } from '../domain/types.ts';
+import { ValidationError } from '../store/db.ts';
+
+export interface EmailTemplate {
+  name: string;
+  subject: string;
+  body: string;
+}
+
+/**
+ * Knowledge base: the versioned process definitions (playbooks), the communication
+ * templates, and the per-client customizations layered on top.
+ *
+ * Playbooks decide WHAT must happen (deterministic, auditable). The guidance layer
+ * only explains and pre-fills; it never adds or drops compliance steps.
+ */
+export class KnowledgeBase {
+  private playbooks = new Map<CaseType, Playbook>();
+  private templates = new Map<string, EmailTemplate>();
+  private clients = new Map<string, ClientConfig>();
+
+  constructor(configDir: string) {
+    for (const f of readdirSync(join(configDir, 'playbooks')).filter((f) => f.endsWith('.json'))) {
+      const pb = JSON.parse(readFileSync(join(configDir, 'playbooks', f), 'utf8')) as Playbook;
+      validatePlaybook(pb);
+      this.playbooks.set(pb.caseType, pb);
+    }
+    for (const f of readdirSync(join(configDir, 'templates')).filter((f) => f.endsWith('.txt'))) {
+      const raw = readFileSync(join(configDir, 'templates', f), 'utf8');
+      const [first, ...rest] = raw.split('\n');
+      const subject = first.replace(/^Subject:\s*/, '');
+      this.templates.set(f.replace(/\.txt$/, ''), { name: f.replace(/\.txt$/, ''), subject, body: rest.join('\n').trim() });
+    }
+    const clientsDir = join(configDir, 'clients');
+    if (existsSync(clientsDir)) {
+      for (const f of readdirSync(clientsDir).filter((f) => f.endsWith('.json'))) {
+        const c = JSON.parse(readFileSync(join(clientsDir, f), 'utf8')) as ClientConfig;
+        this.clients.set(c.clientId, c);
+      }
+    }
+  }
+
+  listPlaybooks(): Playbook[] {
+    return [...this.playbooks.values()];
+  }
+
+  listClients(): ClientConfig[] {
+    return [...this.clients.values()].sort((a, b) => (a.clientId === 'default' ? -1 : b.clientId === 'default' ? 1 : a.clientId.localeCompare(b.clientId)));
+  }
+
+  client(clientId: string): ClientConfig {
+    return this.clients.get(clientId) ?? { clientId, displayName: clientId };
+  }
+
+  /** The generic playbook for a case type with the client's overrides applied. */
+  playbookFor(caseType: CaseType, clientId: string): Playbook {
+    const base = this.playbooks.get(caseType);
+    if (!base) throw new ValidationError(`No playbook for case type ${caseType}`);
+    const ov = this.client(clientId).playbookOverrides?.[caseType];
+    if (!ov) return base;
+
+    const disabled = new Set(ov.disableSteps ?? []);
+    let steps: PlaybookStep[] = base.steps
+      .filter((s) => !disabled.has(s.id))
+      .map((s) => ({
+        ...s,
+        mode: ov.modeOverrides?.[s.id] ?? s.mode,
+        dependsOn: (s.dependsOn ?? []).filter((d) => !disabled.has(d)),
+      }));
+    steps = steps.concat(ov.addSteps ?? []);
+    const pb: Playbook = { ...base, id: `${base.id}+${clientId}`, steps };
+    validatePlaybook(pb);
+    return pb;
+  }
+
+  template(name: string, clientId: string): EmailTemplate {
+    const override = this.client(clientId).templateOverrides?.[name];
+    const t = this.templates.get(override ?? name);
+    if (!t) throw new ValidationError(`Template ${override ?? name} not found`);
+    return t;
+  }
+}
+
+/** Steps must have unique ids, known dependencies, and no cycles. */
+export function validatePlaybook(pb: Playbook): void {
+  const ids = new Set<string>();
+  for (const s of pb.steps) {
+    if (ids.has(s.id)) throw new ValidationError(`Playbook ${pb.id}: duplicate step ${s.id}`);
+    ids.add(s.id);
+  }
+  for (const s of pb.steps) {
+    for (const d of s.dependsOn ?? []) {
+      if (!ids.has(d)) throw new ValidationError(`Playbook ${pb.id}: step ${s.id} depends on unknown step ${d}`);
+    }
+  }
+  const visiting = new Set<string>();
+  const done = new Set<string>();
+  const byId = new Map(pb.steps.map((s) => [s.id, s]));
+  const visit = (id: string): void => {
+    if (done.has(id)) return;
+    if (visiting.has(id)) throw new ValidationError(`Playbook ${pb.id}: dependency cycle at ${id}`);
+    visiting.add(id);
+    for (const d of byId.get(id)?.dependsOn ?? []) visit(d);
+    visiting.delete(id);
+    done.add(id);
+  };
+  pb.steps.forEach((s) => visit(s.id));
+}

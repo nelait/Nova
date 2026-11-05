@@ -1,0 +1,14 @@
+Subject: Blackout period notice – {{plan.details.sponsorName}} plan
+
+Dear {{recipient.name}},
+
+Because the plan is moving to {{request.successorProvider}}, participants will temporarily be unable to change investments, take loans or request distributions.
+
+  - Plan termination/transfer effective: {{request.effectiveDate}}
+  - Blackout period expected to begin: {{request.blackoutStart}}
+  - Blackout period expected to end: {{request.blackoutEnd}}
+
+Federal law requires participants to receive this notice at least 30 days before the blackout begins. Please distribute the enclosed participant notice right away.
+
+Kind regards,
+Plan Services Team
