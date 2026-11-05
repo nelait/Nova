@@ -28,7 +28,7 @@
     <h4>Overview</h4><a href="index.html">Docs home</a>
     <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
 <h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
-<h4>Operate</h4><a href="deployment.html" aria-current="page">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+<h4>Operate</h4><a href="sign-in.html">Sign-in and single sign-on</a><a href="deployment.html" aria-current="page">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
   </details></nav>
   <article class="doc">
 <h1>Deployment</h1>
@@ -48,6 +48,16 @@ settings, then what to put in place before real plan data goes through it.</p>
 <td><code>PORT</code></td>
 <td><code>3000</code></td>
 <td>HTTP port</td>
+</tr>
+<tr>
+<td><code>OIDC_ISSUER</code>, <code>OIDC_CLIENT_ID</code>, <code>OIDC_REDIRECT_URI</code>, <code>OIDC_CLIENT_SECRET</code></td>
+<td>none</td>
+<td>Single sign-on. See <a href="sign-in.html">Sign-in</a> for all settings. Without them the app runs in development mode on localhost only.</td>
+</tr>
+<tr>
+<td><code>HOST</code></td>
+<td><code>127.0.0.1</code> (dev), <code>0.0.0.0</code> (SSO)</td>
+<td>Listening address</td>
 </tr>
 <tr>
 <td><code>DB_PATH</code></td>
@@ -84,7 +94,7 @@ settings, then what to put in place before real plan data goes through it.</p>
 are files under <code>config/</code>. Keep them in version control and review changes like
 code: they are your operating procedures.</p>
 <pre><code class="language-bash">npm install
-npm test            # 65 tests, including every rule set&#39;s own test cases
+npm test            # 77 tests, including every rule set&#39;s own test cases
 npm start
 </code></pre>
 <h2 id="before-production">Before production</h2>
@@ -98,13 +108,13 @@ npm start
 </thead>
 <tbody><tr>
 <td><strong>Sign-in</strong></td>
-<td>No login. The acting user comes from an <code>x-user-id</code> header, so any caller can act as anyone.</td>
-<td>Single sign-on (OIDC/SAML) and authorization by role and skill on every API route. <strong>Do not expose the prototype to a network.</strong></td>
+<td>Single sign-on through OIDC with server-side sessions and an admin role (<a href="sign-in.html">Sign-in</a>). Without it, development mode listens on localhost only.</td>
+<td>SAML, if your provider can&#39;t do OIDC; finer roles (for example read-only auditors).</td>
 </tr>
 <tr>
-<td><strong>Demo endpoints</strong></td>
-<td><code>POST /api/trac/simulate-outage</code> is exposed.</td>
-<td>Remove it, or restrict it to test environments.</td>
+<td><strong>Transport security</strong></td>
+<td>Plain HTTP; cookies are <code>Secure</code> when the redirect URI is <code>https</code>.</td>
+<td>A TLS-terminating proxy or load balancer in front.</td>
 </tr>
 <tr>
 <td><strong>Database</strong></td>
@@ -146,7 +156,7 @@ npm start
 </ol>
 
     <nav class="pager" aria-label="Previous and next">
-      <a href="users-and-routing.html"><small>Previous</small>Users and routing</a>
+      <a href="sign-in.html"><small>Previous</small>Sign-in and single sign-on</a>
       <a href="api.html" style="text-align:right"><small>Next</small>API reference</a>
     </nav>
   </article>

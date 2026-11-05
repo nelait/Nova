@@ -65,5 +65,7 @@ Then adapt the processes to your service model: [Process definitions](playbooks.
 
 ## 6. Before you go live
 
-Read [Deployment](deployment.md). The prototype has no login yet, so do not
-expose it to a network as it is.
+Set up [single sign-on](sign-in.md) with your identity provider, then read
+[Deployment](deployment.md). Without single sign-on the app runs in development
+mode and only accepts connections from the same computer. To try sign-in
+locally first, run `npm run demo:sso`.

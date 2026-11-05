@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.ts",
+    "demo:sso": "node --disable-warning=ExperimentalWarning scripts/demo.ts --sso",
     "site:build": "node --disable-warning=ExperimentalWarning scripts/build-site.ts",
     "try:agent": "node --disable-warning=ExperimentalWarning scripts/try-fund-mapping-agent.ts",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",

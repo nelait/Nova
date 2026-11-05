@@ -114,6 +114,12 @@
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
   .kpi b { font: 600 30px/1.1 var(--font-display); display: block; font-variant-numeric: tabular-nums; }
+  body:not(.is-admin) .admin-only, body:not(.dev-mode) .dev-only, body.sso .dev-only { display: none !important; }
+  .who { display: flex; align-items: center; gap: 10px; }
+  .who .avatar { flex: 0 0 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px; }
+  .who div { min-width: 0; } .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .who span { font-size: 12px; color: var(--muted); }
+  .who button { margin-left: auto; flex: 0 0 auto; }
+  .devnote { font-size: 12px; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 6px 8px; }
 </style>
 </head>
 <body>
@@ -125,7 +131,9 @@
     </div>
     <nav id="tabs" aria-label="Sections"></nav>
     <div class="side-foot">
-      <div><label for="userSel">Working as</label><select id="userSel"></select></div>
+      <div class="who" id="who" hidden></div>
+      <div class="dev-only"><label for="userSel">Working as</label><select id="userSel"></select>
+        <p class="devnote" style="margin:6px 0 0">Development mode: no sign-in, this computer only. <a href="/site/docs/sign-in.html">Set up single sign-on</a></p></div>
       <div><label id="themeLabel">Theme</label><div class="themes" role="group" aria-labelledby="themeLabel" id="themes">
         <button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button><button data-theme-choice="contrast" title="High contrast">High</button>
       </div></div>
@@ -141,10 +149,14 @@
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const state = { tab: 'inbox', user: null, selTask: null, selCase: null, ai: { enabled: false } };
+const state = { tab: 'inbox', user: null, mode: 'dev', me: null, selTask: null, selCase: null, ai: { enabled: false } };
 
 async function api(path, opts = {}) {
-  const res = await fetch('/api' + path, { method: opts.method ?? 'GET', headers: { 'content-type': 'application/json', 'x-user-id': state.user ?? 'anonymous' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const headers = { 'content-type': 'application/json' };
+  // With single sign-on the session cookie identifies you; the header is only used in development mode.
+  if (state.mode === 'dev') headers['x-user-id'] = state.user ?? 'anonymous';
+  const res = await fetch('/api' + path, { method: opts.method ?? 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (res.status === 401) { location.href = '/auth/login?returnTo=' + encodeURIComponent(location.pathname + location.search); throw new Error('Signing you in…'); }
   const data = await res.json();
   if (!res.ok) throw new Error(data.error + (data.issues?.length ? '\n• ' + data.issues.join('\n• ') : ''));
   return data;
@@ -397,7 +409,7 @@ async function renderCases(v) {
     <h3>Steps</h3><div class="steps">${d.tasks.map((t) => `<div class="step"><div><b>${esc(t.name)}</b><div class="small muted">${t.skill}${t.minSkillLevel > 1 ? ' L' + t.minSkillLevel + '+' : ''} · ${t.assigneeId ?? (t.status === 'READY' && t.mode !== 'AUTO' ? 'unassigned queue' : '—')}</div>
       ${t.exception ? `<div class="small" style="color:var(--bad)">${esc(t.exception)}</div>` : ''}
       ${t.status === 'SKIPPED' ? (() => { const h = t.history.find((x) => x.event === 'skipped' && x.detail?.condition); return h ? `<div class="small muted">Skipped: condition not met (<code>${esc(h.detail.condition)}</code>)</div>` : '<div class="small muted">Skipped: case cancelled</div>'; })() : ''}</div><div><span class="chip ${t.mode}">${t.mode}</span>${statusChip(t)}</div></div>`).join('')}</div>
-    ${d.case.status === 'OPEN' ? '<div class="actions"><button class="btn secondary" id="cancel">Cancel case</button></div>' : ''}
+    ${d.case.status === 'OPEN' ? '<div class="actions admin-only"><button class="btn secondary" id="cancel">Cancel case</button></div>' : ''}
     <h3>Audit trail</h3><div class="scroll"><table><tr><th>When</th><th>Who</th><th>Event</th><th>Detail</th></tr>${d.audit.map((a) => `<tr><td class="small">${fmtDate(a.at)}</td><td class="small">${esc(a.actor)}</td><td class="small">${esc(a.event)}</td><td class="small muted">${esc(a.detail ? JSON.stringify(a.detail).slice(0, 140) : '')}</td></tr>`).join('')}</table></div>`;
   $('#cancel')?.addEventListener('click', () => guarded(async () => { const reason = prompt('Reason for cancelling?'); if (!reason) return; await api(`/cases/${state.selCase}/cancel`, { method: 'POST', body: { reason } }); render(); }));
 }
@@ -408,10 +420,10 @@ async function renderTeam(v) {
   const [users, queue] = await Promise.all([api('/users'), api('/queue/unassigned')]);
   v.innerHTML = `<div class="panel"><h2>Users and skills</h2><div class="scroll"><table><tr><th>User</th><th>Skills</th><th>Load</th><th>Source</th><th>Active</th></tr>
     ${users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="small muted">${u.id}</div></td><td>${u.skills.map((s) => `<span class="chip">${s.skill} L${s.level}</span>`).join('')}</td><td>${u.openTasks}/${u.capacity}</td><td class="small">${esc(u.source)}</td>
-      <td><input type="checkbox" style="width:auto" data-u="${u.id}" ${u.active ? 'checked' : ''}></td></tr>`).join('')}</table></div>
+      <td><input type="checkbox" style="width:auto" data-u="${u.id}" ${u.active ? 'checked' : ''} ${state.isAdmin ? '' : 'disabled title="Needs the admin role"'}></td></tr>`).join('')}</table></div>
     <h3>Unassigned queue (${queue.length})</h3>${queue.map((t) => `<div class="small">${esc(t.name)} — needs ${t.skill} L${t.minSkillLevel}+ ${t.exception ? '<span class="chip exception">exception</span>' : ''}</div>`).join('') || '<p class="small muted">Empty.</p>'}
-    <h3>Import users from identity provider (SCIM)</h3><p class="small muted">Skills are IdP groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>. Importing re-runs routing for the unassigned queue.</p>
-    <textarea id="scim" rows="10">${esc(JSON.stringify(SCIM_SAMPLE, null, 2))}</textarea><div class="actions"><button class="btn" id="imp">Import</button></div></div>`;
+    <div class="admin-only"><h3>Import users from identity provider (SCIM)</h3><p class="small muted">Skills are IdP groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>. Importing re-runs routing for the unassigned queue.</p>
+    <textarea id="scim" rows="10">${esc(JSON.stringify(SCIM_SAMPLE, null, 2))}</textarea><div class="actions"><button class="btn" id="imp">Import</button></div></div></div>`;
   v.querySelector('table').onchange = (e) => guarded(async () => { const id = e.target.dataset.u; if (id) { await api(`/users/${id}/active`, { method: 'POST', body: { active: e.target.checked } }); render(); } });
   $('#imp').onclick = () => guarded(async () => { await api('/users/import/scim', { method: 'POST', body: JSON.parse($('#scim').value) }); toast('Imported'); await loadUsers(); render(); });
 }
@@ -421,7 +433,7 @@ async function renderTrac(v) {
   const plans = await api('/trac/plans');
   v.innerHTML = `<div class="panel"><h2>Recordkeeper (TRAC): system of record</h2>
     <p class="small muted">Read live through the <b>trac</b> integration (<code>listPlans</code>). Plans appear here only when an installation's final step succeeds. Maintenance and termination cases read from and write to these records.</p>
-    <div class="actions"><button class="btn secondary" id="outage">Simulate TRAC outage (next 10 requests)</button></div>
+    <div class="actions dev-only admin-only"><button class="btn secondary" id="outage">Simulate TRAC outage (next 10 requests)</button></div>
     <div class="scroll"><table><tr><th>TRAC id</th><th>Sponsor</th><th>Status</th><th>Version</th><th>Funds</th><th>Plan admin</th><th>Updated</th></tr>
     ${plans.map((p) => `<tr><td>${p.id}</td><td>${esc(p.sponsor?.name)}<div class="small muted">${esc(p.sponsor?.ein)}</div></td><td><span class="chip ${p.status}">${p.status}</span>${p.successorProvider ? `<div class="small muted">→ ${esc(p.successorProvider)}</div>` : ''}</td><td>v${p.version}</td>
       <td class="small">${p.funds.map((f) => esc(f.ticker) + (f.qdia ? '*' : '')).join(', ')}</td><td class="small">${esc(p.contacts.find((c) => c.role === 'PLAN_ADMINISTRATOR')?.email)}</td><td class="small">${fmtDate(p.updatedAt)}</td></tr>`).join('')}</table></div></div>`;
@@ -487,7 +499,7 @@ async function renderIntegrations(v) {
     ${systems.map((s) => `<div class="item" style="cursor:default">
       <div class="row" style="align-items:flex-start"><div style="flex:3"><b>${esc(s.name)}</b> <span class="muted small">${esc(s.id)}</span>
         <div class="small muted">${esc(s.description)}</div></div>
-        <div style="flex:0 0 auto"><button class="btn secondary" data-test="${s.id}">Test connection</button></div></div>
+        <div style="flex:0 0 auto" class="admin-only"><button class="btn secondary" data-test="${s.id}">Test connection</button></div></div>
       <div class="small" style="margin-top:6px"><span class="chip ${s.mock ? 'MANUAL' : 'DONE'}">${s.mock ? 'built-in mock' : 'live'}</span><code>${esc(s.baseUrl)}</code></div>
       <div class="small" style="margin-top:4px">Auth: <b>${esc(s.auth)}</b> ${s.secrets.map((x) => `<span class="chip ${x.set ? 'DONE' : 'exception'}">${esc(x.env)}: ${x.set ? (s.mock ? 'not needed (mock)' : 'set') : 'missing'}</span>`).join('')}
         · timeout ${s.timeoutMs} ms · up to ${s.retry.attempts} attempts</div>
@@ -529,14 +541,39 @@ async function render() { const v = $('#view'); await guarded(() => VIEWS[state.
 
 async function loadUsers() {
   const users = await api('/users');
-  let saved = null; try { saved = localStorage.getItem('planops.user'); } catch {}
-  state.user = state.user ?? (users.some((u) => u.id === saved) ? saved : users[0]?.id);
-  $('#userSel').innerHTML = users.filter((u) => u.active).map((u) => `<option value="${u.id}" ${u.id === state.user ? 'selected' : ''}>${esc(u.name)} (${u.openTasks})</option>`).join('');
-  state.myCount = users.find((u) => u.id === state.user)?.openTasks ?? 0;
+  if (state.mode === 'dev') {
+    let saved = null; try { saved = localStorage.getItem('planops.user'); } catch {}
+    state.user = state.user ?? (users.some((u) => u.id === saved) ? saved : users[0]?.id);
+    $('#userSel').innerHTML = users.filter((u) => u.active).map((u) => `<option value="${u.id}" ${u.id === state.user ? 'selected' : ''}>${esc(u.name)} (${u.openTasks})</option>`).join('');
+  }
+  const me = users.find((u) => u.id === state.user);
+  state.myCount = me?.openTasks ?? 0;
+  // The server enforces the admin role; the UI only hides controls you can't use.
+  state.isAdmin = !!me?.roles?.includes('admin');
+  document.body.classList.toggle('is-admin', state.isAdmin);
   renderTabs();
 }
-setInterval(() => { if (state.tab !== 'intake' && state.tab !== 'team' && !document.activeElement?.matches('input,textarea')) loadUsers(); }, 5000);
-Promise.all([loadUsers(), api('/ai/status').then((s) => (state.ai = s)).catch(() => {})]).then(() => { renderTabs(); render(); });
+
+/** Signed-in user card with a sign-out button (single sign-on only). */
+function renderWho(user) {
+  const initials = user.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  const who = $('#who');
+  who.hidden = false;
+  who.innerHTML = `<span class="avatar" aria-hidden="true">${esc(initials)}</span><div><b>${esc(user.name)}</b><span>${esc(user.email)}</span></div><button class="btn secondary" id="signOut">Sign out</button>`;
+  $('#signOut').onclick = () => guarded(async () => { await fetch('/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); location.href = '/auth/signed-out'; });
+}
+
+async function boot() {
+  const me = await api('/me');
+  state.mode = me.mode;
+  document.body.classList.toggle('sso', me.mode === 'oidc');
+  document.body.classList.toggle('dev-mode', me.mode === 'dev');
+  if (me.mode === 'oidc') { state.user = me.user.id; renderWho(me.user); }
+  await Promise.all([loadUsers(), api('/ai/status').then((s) => (state.ai = s)).catch(() => {})]);
+  renderTabs(); render();
+}
+setInterval(() => { if (state.mode && state.tab !== 'intake' && state.tab !== 'team' && !document.activeElement?.matches('input,textarea')) loadUsers().catch(() => {}); }, 5000);
+boot().catch((e) => toast(e.message, true));
 </script>
 </body>
 </html>

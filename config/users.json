@@ -1,5 +1,5 @@
 [
-  { "id": "u_priya", "name": "Priya Shah", "email": "priya@planops.example", "capacity": 10, "skills": [{ "skill": "PLAN_SETUP", "level": 3 }, { "skill": "MAINTENANCE", "level": 2 }] },
+  { "id": "u_priya", "name": "Priya Shah", "email": "priya@planops.example", "capacity": 10, "roles": ["admin"], "skills": [{ "skill": "PLAN_SETUP", "level": 3 }, { "skill": "MAINTENANCE", "level": 2 }] },
   { "id": "u_marcus", "name": "Marcus Lee", "email": "marcus@planops.example", "capacity": 8, "skills": [{ "skill": "PLAN_SETUP", "level": 1 }, { "skill": "MAINTENANCE", "level": 3 }] },
   { "id": "u_elena", "name": "Elena Garcia", "email": "elena@planops.example", "capacity": 10, "skills": [{ "skill": "COMPLIANCE", "level": 3 }] },
   { "id": "u_rafael", "name": "Rafael Torres", "email": "rafael@planops.example", "capacity": 8, "skills": [{ "skill": "COMPLIANCE", "level": 2 }] },

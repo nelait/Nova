@@ -1,10 +1,26 @@
 # API reference
 
-JSON over HTTP. Send `content-type: application/json`. The acting user is the
-`x-user-id` header; in production this must come from a signed-in session (see
-[Deployment](deployment.md)). Errors return `{ "error": "...", "issues": [...] }`
-with status 404 (not found), 422 (validation), 502 (external system), 503 (AI
-unavailable) or 500.
+JSON over HTTP. Requests that change data must send `content-type: application/json`
+from this site's own origin.
+
+**Who is calling.** With [single sign-on](sign-in.md), the session cookie set at
+sign-in identifies the user; without one the API returns 401
+`{ "error": "Sign in required", "signIn": "/auth/login" }`. In development mode
+(localhost only) the acting user is the `x-user-id` header. Routes marked
+**admin** need the admin role.
+
+Errors return `{ "error": "...", "issues": [...] }` with status 401 (not signed
+in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
+503 (AI unavailable) or 500.
+
+## Sign-in
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/auth/login?returnTo=/path` | Redirects to the identity provider |
+| GET | `/auth/callback` | The provider returns here; sets the session cookie |
+| POST | `/auth/logout` | Ends the session |
+| GET | `/api/me` | `{ mode: "oidc" \| "dev", user }` |
 
 ## Requests and cases
 
@@ -13,7 +29,7 @@ unavailable) or 500.
 | POST | `/api/intake` | Start a case. `{ caseType, channel, clientId?, planId?, data?, documentText? }`. `channel` is `DIGITAL`, `MANUAL` or `PAPER`; paper takes `documentText`. Maintenance and termination need `planId`. |
 | GET | `/api/cases` | All cases with progress |
 | GET | `/api/cases/:id` | A case with its plan, tasks and audit trail |
-| POST | `/api/cases/:id/cancel` | `{ reason }` |
+| POST | `/api/cases/:id/cancel` | `{ reason }` **admin** |
 | GET | `/api/plans`, `/api/plans/:id` | Plans |
 | PATCH | `/api/plans/:id` | Correct onboarding data. Only before the plan is on the recordkeeper. |
 
@@ -38,7 +54,7 @@ POST /api/intake
 | GET | `/api/tasks/:id/guidance` | Guidance, checklist, alerts and the prepared work |
 | POST | `/api/tasks/:id/start` | Start working a task |
 | POST | `/api/tasks/:id/complete` | Approve, confirm, retry or override. `{ notes?, edits?, override?, draftSource? }`. `edits` is `{ subject, body }` for emails or `{ output }` for AI agent steps. |
-| POST | `/api/tasks/:id/reassign` | `{ toUserId? }`. Omit to route again. |
+| POST | `/api/tasks/:id/reassign` | `{ toUserId? }`. Omit to route again. Your own task, or **admin** for anyone's. |
 | POST | `/api/tasks/:id/agent/run` | Ask the AI agent for a new proposal |
 | GET / POST | `/api/tasks/:id/ai-assist` | Stored Claude assist / ask Claude (`{ refresh? }`) |
 
@@ -51,7 +67,7 @@ POST /api/intake
 | POST | `/api/rules/:id/test` | Run a rule set's test cases |
 | POST | `/api/rules/:id/evaluate` | `{ caseId }` or `{ context }`. Read-only. |
 | GET | `/api/integrations`, `/api/integrations/calls` | Systems (secret status, never values) and the call log |
-| POST | `/api/integrations/:id/test` | Run a system's health check |
+| POST | `/api/integrations/:id/test` | Run a system's health check **admin** |
 | GET | `/api/agents`, `/api/ai/status` | AI agents, and whether Claude is enabled |
 
 ## Team
@@ -59,9 +75,9 @@ POST /api/intake
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/users` | Users with skills and open-task counts |
-| POST | `/api/users/import/scim` | SCIM 2.0 import. See [Users and routing](users-and-routing.md). |
-| POST | `/api/users/import` | Plain JSON import |
-| POST | `/api/users/:id/active` | `{ active }` |
+| POST | `/api/users/import/scim` | SCIM 2.0 import. See [Users and routing](users-and-routing.md). **admin** |
+| POST | `/api/users/import` | Plain JSON import **admin** |
+| POST | `/api/users/:id/active` | `{ active }` **admin** |
 
 ## Monitoring
 

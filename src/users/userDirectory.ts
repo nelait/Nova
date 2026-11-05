@@ -19,9 +19,12 @@ export interface ScimUser {
  */
 export function scimToUser(s: ScimUser, source: string, capacity = 8): User {
   const skills: SkillGrant[] = [];
+  const roles: string[] = [];
   for (const g of s.groups ?? []) {
     const m = g.display.match(/^skill:([A-Z_]+):([1-3])$/);
     if (m) skills.push({ skill: m[1], level: Number(m[2]) });
+    const r = g.display.match(/^role:([a-z][a-z0-9-]*)$/);
+    if (r) roles.push(r[1]);
   }
   const email = s.emails?.find((e) => e.primary)?.value ?? s.emails?.[0]?.value ?? s.userName;
   return {
@@ -31,6 +34,7 @@ export function scimToUser(s: ScimUser, source: string, capacity = 8): User {
     active: s.active ?? true,
     capacity,
     skills,
+    roles,
     source,
   };
 }
@@ -59,6 +63,7 @@ export class UserDirectory {
         active: u.active ?? true,
         capacity: u.capacity ?? existing?.capacity ?? 8,
         skills: u.skills ?? existing?.skills ?? [],
+        roles: u.roles ?? existing?.roles ?? [],
         source,
       };
       this.users.upsert(user);
@@ -88,5 +93,11 @@ export class UserDirectory {
 
   get(id: string): User | undefined {
     return this.users.get(id);
+  }
+
+  /** User with this email (case-insensitive), active or not; sign-in checks `active` itself. */
+  byEmail(email: string): User | undefined {
+    const e = email.trim().toLowerCase();
+    return this.users.find((u) => u.email.toLowerCase() === e)[0];
   }
 }

@@ -171,6 +171,8 @@ export interface User {
   active: boolean;
   capacity: number; // max concurrent open tasks
   skills: SkillGrant[];
+  /** Permissions beyond working tasks, e.g. 'admin'. From identity-provider groups named role:<name>. */
+  roles?: string[];
   source: string; // e.g. 'okta', 'azure-ad', 'seed'
 }
 

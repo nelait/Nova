@@ -28,15 +28,50 @@
     <h4>Overview</h4><a href="index.html">Docs home</a>
     <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
 <h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
-<h4>Operate</h4><a href="deployment.html">Deployment</a><a href="api.html" aria-current="page">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+<h4>Operate</h4><a href="sign-in.html">Sign-in and single sign-on</a><a href="deployment.html">Deployment</a><a href="api.html" aria-current="page">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
   </details></nav>
   <article class="doc">
 <h1>API reference</h1>
-<p>JSON over HTTP. Send <code>content-type: application/json</code>. The acting user is the
-<code>x-user-id</code> header; in production this must come from a signed-in session (see
-<a href="deployment.html">Deployment</a>). Errors return <code>{ &quot;error&quot;: &quot;...&quot;, &quot;issues&quot;: [...] }</code>
-with status 404 (not found), 422 (validation), 502 (external system), 503 (AI
-unavailable) or 500.</p>
+<p>JSON over HTTP. Requests that change data must send <code>content-type: application/json</code>
+from this site&#39;s own origin.</p>
+<p><strong>Who is calling.</strong> With <a href="sign-in.html">single sign-on</a>, the session cookie set at
+sign-in identifies the user; without one the API returns 401
+<code>{ &quot;error&quot;: &quot;Sign in required&quot;, &quot;signIn&quot;: &quot;/auth/login&quot; }</code>. In development mode
+(localhost only) the acting user is the <code>x-user-id</code> header. Routes marked
+<strong>admin</strong> need the admin role.</p>
+<p>Errors return <code>{ &quot;error&quot;: &quot;...&quot;, &quot;issues&quot;: [...] }</code> with status 401 (not signed
+in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
+503 (AI unavailable) or 500.</p>
+<h2 id="sign-in">Sign-in</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GET</td>
+<td><code>/auth/login?returnTo=/path</code></td>
+<td>Redirects to the identity provider</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/auth/callback</code></td>
+<td>The provider returns here; sets the session cookie</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/auth/logout</code></td>
+<td>Ends the session</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/me</code></td>
+<td><code>{ mode: &quot;oidc&quot; | &quot;dev&quot;, user }</code></td>
+</tr>
+</tbody></table></div>
 <h2 id="requests-and-cases">Requests and cases</h2>
 <div class="table-wrap"><table>
 <thead>
@@ -64,7 +99,7 @@ unavailable) or 500.</p>
 <tr>
 <td>POST</td>
 <td><code>/api/cases/:id/cancel</code></td>
-<td><code>{ reason }</code></td>
+<td><code>{ reason }</code> <strong>admin</strong></td>
 </tr>
 <tr>
 <td>GET</td>
@@ -123,7 +158,7 @@ unavailable) or 500.</p>
 <tr>
 <td>POST</td>
 <td><code>/api/tasks/:id/reassign</code></td>
-<td><code>{ toUserId? }</code>. Omit to route again.</td>
+<td><code>{ toUserId? }</code>. Omit to route again. Your own task, or <strong>admin</strong> for anyone&#39;s.</td>
 </tr>
 <tr>
 <td>POST</td>
@@ -173,7 +208,7 @@ unavailable) or 500.</p>
 <tr>
 <td>POST</td>
 <td><code>/api/integrations/:id/test</code></td>
-<td>Run a system&#39;s health check</td>
+<td>Run a system&#39;s health check <strong>admin</strong></td>
 </tr>
 <tr>
 <td>GET</td>
@@ -198,17 +233,17 @@ unavailable) or 500.</p>
 <tr>
 <td>POST</td>
 <td><code>/api/users/import/scim</code></td>
-<td>SCIM 2.0 import. See <a href="users-and-routing.html">Users and routing</a>.</td>
+<td>SCIM 2.0 import. See <a href="users-and-routing.html">Users and routing</a>. <strong>admin</strong></td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/users/import</code></td>
-<td>Plain JSON import</td>
+<td>Plain JSON import <strong>admin</strong></td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/users/:id/active</code></td>
-<td><code>{ active }</code></td>
+<td><code>{ active }</code> <strong>admin</strong></td>
 </tr>
 </tbody></table></div>
 <h2 id="monitoring">Monitoring</h2>
@@ -247,7 +282,7 @@ unavailable) or 500.</p>
       <a href="architecture.html" style="text-align:right"><small>Next</small>Architecture</a>
     </nav>
   </article>
-  <aside class="toc"><b>On this page</b><a href="#requests-and-cases">Requests and cases</a><a href="#work">Work</a><a href="#configuration-read-only">Configuration (read-only)</a><a href="#team">Team</a><a href="#monitoring">Monitoring</a></aside>
+  <aside class="toc"><b>On this page</b><a href="#sign-in">Sign-in</a><a href="#requests-and-cases">Requests and cases</a><a href="#work">Work</a><a href="#configuration-read-only">Configuration (read-only)</a><a href="#team">Team</a><a href="#monitoring">Monitoring</a></aside>
 </div>
 <script>
   (function () {

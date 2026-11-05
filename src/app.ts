@@ -15,6 +15,8 @@ import { GuidanceService } from './guidance/guidedActions.ts';
 import { computeInsights } from './learning/insights.ts';
 import { AiAssistService, claudeModelCall, type AiAssist, type ModelCall } from './ai/claudeAssist.ts';
 import { AgentRunner, claudeAgentModel, type AgentModel } from './ai/agents.ts';
+import { AuthService, type LoginRequest, type Session } from './auth/auth.ts';
+import { OidcClient, oidcConfigFromEnv } from './auth/oidc.ts';
 
 export interface AppOptions {
   dbPath?: string; // ':memory:' for tests
@@ -34,6 +36,8 @@ export interface AppOptions {
   transport?: Transport;
   /** Wait between retries (tests pass a no-op). */
   sleep?: (ms: number) => Promise<void>;
+  /** HTTP transport for the single sign-on provider (tests inject a stub). */
+  oidcTransport?: Transport;
 }
 
 function hasAnthropicCredentials(): boolean {
@@ -74,6 +78,18 @@ export function createApp(opts: AppOptions = {}) {
   const executor = new ActionExecutor(kb, integrations, email, agents);
   const users = new UserDirectory(usersRepo);
   const cases = new CaseService(repos, kb, executor, integrations, users, clock);
+
+  // Sign-in: single sign-on when OIDC_* is configured, otherwise development mode.
+  const oidcConfig = oidcConfigFromEnv(env);
+  const auth = new AuthService({
+    oidc: oidcConfig ? new OidcClient(oidcConfig, opts.oidcTransport, () => clock.now().getTime()) : undefined,
+    sessions: new Collection<Session>(db, 'sessions'),
+    requests: new Collection<LoginRequest>(db, 'login_requests'),
+    users,
+    audit: (actor, entityId, event, detail) => cases.audit(actor, 'user', entityId, event, detail),
+    now: () => clock.now(),
+    sessionHours: env.SESSION_TTL_HOURS ? Number(env.SESSION_TTL_HOURS) : undefined,
+  });
   const guidance = new GuidanceService(kb, executor);
   const aiModel = opts.aiModel === undefined ? (hasAnthropicCredentials() ? claudeModelCall() : undefined) : (opts.aiModel ?? undefined);
   const ai = new AiAssistService(cases, guidance, new Collection<AiAssist>(db, 'ai_assists'), clock, aiModel);
@@ -95,6 +111,7 @@ export function createApp(opts: AppOptions = {}) {
     cases,
     guidance,
     ai,
+    auth,
     insights: () => computeInsights(repos.cases.all(), repos.tasks.all(), users.list(), clock.now()),
   };
 }

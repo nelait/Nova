@@ -25,7 +25,16 @@ Each client can have a variant of any process (extra steps, different automation
 its own templates or rule sets) without forking the standard process. See
 [Process definitions](playbooks.md#per-client-variations).
 
+**How do people sign in?**
+Through your identity provider with OpenID Connect (Okta, Entra ID, Google
+Workspace, Ping, Auth0). Plan Ops Hub never handles passwords, and people must
+also be active users in its directory. See [Sign-in](sign-in.md).
+
 ## Troubleshooting
+
+**"You don't have access yet" after signing in.**
+The person signed in at the identity provider but isn't an active Plan Ops Hub
+user with that email. Import them through SCIM or reactivate them.
 
 **The server won't start and names a playbook, rule set, integration or agent.**
 Configuration is checked at startup. The message names the file, the step or rule,

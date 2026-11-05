@@ -194,6 +194,6 @@ actual contract terms.
 | `mock://trac` | Set `TRAC_BASE_URL` / `TRAC_API_KEY` for the real API; add reconciliation |
 | Outbox table | Mail service + template/document service (PDF notices) |
 | In-process `advance()` with a lock per case | Durable workflow engine or job queue (e.g. Temporal, or a DB-backed outbox), so external calls don't hold requests open and survive restarts |
-| `x-user-id` header | OIDC/SAML login; authorization by role and skill |
+| OIDC single sign-on, `admin` role | SAML; finer-grained roles |
 | Regex "OCR" parser | IDP/OCR service with per-field confidence and low-confidence review |
 | On-demand Claude assist | Build an eval set from real cases before changing the prompt or model; consider pre-generating assists when tasks become ready; add retrieval over policy documents for the knowledge base |

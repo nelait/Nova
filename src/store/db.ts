@@ -32,6 +32,10 @@ export class Collection<T extends { id: string }> {
     return this.get(doc.id) ? this.update(doc) : this.insert(doc);
   }
 
+  delete(id: string): boolean {
+    return this.db.prepare(`DELETE FROM ${this.name} WHERE id = ?`).run(id).changes > 0;
+  }
+
   get(id: string): T | undefined {
     const row = this.db.prepare(`SELECT data FROM ${this.name} WHERE id = ?`).get(id) as { data: string } | undefined;
     return row ? (JSON.parse(row.data) as T) : undefined;

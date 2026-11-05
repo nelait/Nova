@@ -100,6 +100,20 @@ Without an API key the Claude panel shows canned responses marked as sample
 data; with `ANTHROPIC_API_KEY` set, **Regenerate** calls Claude. Nothing is
 written to disk.
 
+
+### Single sign-on
+
+```bash
+npm run demo:sso     # demo plus a mock identity provider on :3201
+```
+
+In production, set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` (and
+`OIDC_CLIENT_SECRET`) to sign people in through Okta, Entra ID, Google or any
+OIDC provider. Users must exist and be active in the directory; the `role:admin`
+group grants admin actions. Without these settings the app runs in development
+mode (pick a user, no sign-in) and only listens on localhost. See
+[docs/sign-in.md](docs/sign-in.md).
+
 ### Try it
 
 1. **New request** → submit the sample installation (or switch the channel to *Paper* to see OCR-text intake).
@@ -149,7 +163,7 @@ test/          end-to-end tests
 | POST | `/api/intake` | `{caseType, channel, clientId?, planId?, data? , documentText?}` |
 | GET | `/api/inbox/:userId` | open work items for a user |
 | GET | `/api/tasks/:id/guidance` | guided action for a task |
-| POST | `/api/tasks/:id/complete` | `{edits?, notes?, override?, draftSource?}` (header `x-user-id`) |
+| POST | `/api/tasks/:id/complete` | `{edits?, notes?, override?, draftSource?}` |
 | GET | `/api/rules`, `/api/rules/:id` | rule sets |
 | POST | `/api/rules/:id/test`, `/api/rules/:id/evaluate` | run a rule set's tests; evaluate against `{caseId}` or `{context}` |
 | GET | `/api/integrations`, `/api/integrations/calls` | configured systems; call log |

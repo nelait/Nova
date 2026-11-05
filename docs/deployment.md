@@ -9,6 +9,8 @@ settings, then what to put in place before real plan data goes through it.
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI`, `OIDC_CLIENT_SECRET` | none | Single sign-on. See [Sign-in](sign-in.md) for all settings. Without them the app runs in development mode on localhost only. |
+| `HOST` | `127.0.0.1` (dev), `0.0.0.0` (SSO) | Listening address |
 | `DB_PATH` | `data/planops.db` | SQLite database file |
 | `TRAC_BASE_URL` | `mock://trac` | Recordkeeper API; unset uses the built-in mock |
 | `TRAC_API_KEY` | none | Recordkeeper API key (required when the URL is real) |
@@ -22,7 +24,7 @@ code: they are your operating procedures.
 
 ```bash
 npm install
-npm test            # 65 tests, including every rule set's own test cases
+npm test            # 77 tests, including every rule set's own test cases
 npm start
 ```
 
@@ -30,8 +32,8 @@ npm start
 
 | Area | Today | Needed |
 |---|---|---|
-| **Sign-in** | No login. The acting user comes from an `x-user-id` header, so any caller can act as anyone. | Single sign-on (OIDC/SAML) and authorization by role and skill on every API route. **Do not expose the prototype to a network.** |
-| **Demo endpoints** | `POST /api/trac/simulate-outage` is exposed. | Remove it, or restrict it to test environments. |
+| **Sign-in** | Single sign-on through OIDC with server-side sessions and an admin role ([Sign-in](sign-in.md)). Without it, development mode listens on localhost only. | SAML, if your provider can't do OIDC; finer roles (for example read-only auditors). |
+| **Transport security** | Plain HTTP; cookies are `Secure` when the redirect URI is `https`. | A TLS-terminating proxy or load balancer in front. |
 | **Database** | SQLite with JSON documents. | Postgres with real tables (services use only the storage interface), backups and retention rules. |
 | **External calls** | Run inline when a step becomes ready, with a lock per case. | A durable job queue so slow systems don't hold requests open and work survives restarts; reconciliation with the recordkeeper. |
 | **Email** | Written to an outbox table. | A mail service, plus PDF generation for participant notices. |

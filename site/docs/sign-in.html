@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Sign-in and single sign-on · Plan Ops Hub docs</title>
+<meta name="description" content="Single sign-on with your identity provider, roles and sessions." />
+<meta name="claude:viewport-fit-sides" content="cover" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="../assets/site.css" />
+<script>try { const t = localStorage.getItem('planops.site.theme'); if (t && t !== 'system') document.documentElement.dataset.theme = t; } catch {}</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap">
+    <a class="logo" href="../index.html"><svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--accent)"/><path d="M8 9h14M8 15h9M8 21h5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/><circle cx="21" cy="20" r="3.2" fill="var(--brass)"/></svg>Plan Ops Hub</a>
+    <nav class="topnav" aria-label="Site">
+      <a href="../index.html#how">How it works</a>
+      <a href="index.html" aria-current="page">Docs</a>
+      <a href="https://github.com/nelait/Nova">GitHub</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Theme"><button data-theme-choice="system">Auto</button><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div>
+  </div>
+</header>
+<div class="wrap docs">
+  <nav class="docnav" aria-label="Documentation"><details open><summary>Documentation</summary>
+    <h4>Overview</h4><a href="index.html">Docs home</a>
+    <h4>Start here</h4><a href="getting-started.html">Getting started</a><a href="concepts.html">Concepts</a>
+<h4>Build processes</h4><a href="playbooks.html">Process definitions</a><a href="rules.html">Rules module</a><a href="integrations.html">Integration module</a><a href="agents.html">AI agents as process steps</a><a href="users-and-routing.html">Users and routing</a>
+<h4>Operate</h4><a href="sign-in.html" aria-current="page">Sign-in and single sign-on</a><a href="deployment.html">Deployment</a><a href="api.html">API reference</a><a href="architecture.html">Architecture</a><a href="faq.html">FAQ and troubleshooting</a>
+  </details></nav>
+  <article class="doc">
+<h1>Sign-in and single sign-on</h1>
+<p>Plan Ops Hub signs people in through your organization&#39;s identity provider
+using OpenID Connect (OIDC). It works with Okta, Microsoft Entra ID, Google
+Workspace, Ping, Auth0 and any other standard OIDC provider. Plan Ops Hub never
+sees or stores passwords.</p>
+<p>There are two modes:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>When</th>
+<th>Who you are</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Single sign-on</strong></td>
+<td><code>OIDC_ISSUER</code> is set</td>
+<td>The person who signed in at your identity provider. Sessions last 8 hours.</td>
+</tr>
+<tr>
+<td><strong>Development</strong></td>
+<td>No <code>OIDC_*</code> settings</td>
+<td>Whoever you pick in <strong>Working as</strong>. Anyone can act as anyone, so the server only listens on <code>127.0.0.1</code> (this computer) and refuses to start on a network address.</td>
+</tr>
+</tbody></table></div>
+<h2 id="try-it-locally">Try it locally</h2>
+<pre><code class="language-bash">npm run demo:sso
+</code></pre>
+<p>This starts the demo with a <strong>mock identity provider</strong> on port 3201. Open
+<a href="http://localhost:3000">http://localhost:3000</a>. You are sent to the provider&#39;s page, where you pick who
+to sign in as. Try:</p>
+<ul>
+<li><strong>Priya Shah</strong>: an admin, so she can import users, deactivate users and cancel cases.</li>
+<li><strong>Marcus Lee</strong>: not an admin, so those controls are hidden and the API refuses them.</li>
+<li><strong>Someone not yet provisioned</strong>: signs in at the provider but is refused by Plan Ops Hub, because they aren&#39;t in the user directory.</li>
+</ul>
+<p>The mock provider signs real tokens and checks PKCE, so this exercises the same
+code as production. Never use it outside development.</p>
+<h2 id="set-up-your-identity-provider">Set up your identity provider</h2>
+<ol>
+<li><strong>Register an application</strong> in your provider: type <em>Web application</em>, sign-in method <em>OIDC</em>, grant type <em>Authorization Code</em>. PKCE is always used.</li>
+<li><strong>Sign-in redirect URI:</strong> <code>https://&lt;your Plan Ops Hub address&gt;/auth/callback</code>.</li>
+<li><strong>Scopes:</strong> <code>openid email profile</code>.</li>
+<li>Note the <strong>issuer URL</strong>, <strong>client ID</strong> and <strong>client secret</strong>.<ul>
+<li>Okta: <code>https://&lt;your-org&gt;.okta.com/oauth2/default</code></li>
+<li>Entra ID: <code>https://login.microsoftonline.com/&lt;tenant-id&gt;/v2.0</code></li>
+<li>Google Workspace: <code>https://accounts.google.com</code></li>
+</ul>
+</li>
+<li>Assign the application to the people who should use Plan Ops Hub.</li>
+</ol>
+<p>Then set these environment variables and restart:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>OIDC_ISSUER</code></td>
+<td>yes</td>
+<td>Issuer URL. Must be <code>https</code> (plain <code>http</code> is allowed only for <code>localhost</code>).</td>
+</tr>
+<tr>
+<td><code>OIDC_CLIENT_ID</code></td>
+<td>yes</td>
+<td>Client ID from step 4.</td>
+</tr>
+<tr>
+<td><code>OIDC_REDIRECT_URI</code></td>
+<td>yes</td>
+<td>Exactly the redirect URI registered in step 2. When it is <code>https</code>, cookies are marked <code>Secure</code>.</td>
+</tr>
+<tr>
+<td><code>OIDC_CLIENT_SECRET</code></td>
+<td>for confidential clients</td>
+<td>Client secret. Store it in your secret manager, never in <code>config/</code> or version control.</td>
+</tr>
+<tr>
+<td><code>OIDC_SCOPES</code></td>
+<td>no</td>
+<td>Default <code>openid email profile</code>.</td>
+</tr>
+<tr>
+<td><code>OIDC_USER_CLAIM</code></td>
+<td>no</td>
+<td>ID token claim that identifies the person. Default <code>email</code>.</td>
+</tr>
+<tr>
+<td><code>SESSION_TTL_HOURS</code></td>
+<td>no</td>
+<td>Session length. Default 8.</td>
+</tr>
+<tr>
+<td><code>HOST</code></td>
+<td>no</td>
+<td>Listening address. Default <code>0.0.0.0</code> with single sign-on.</td>
+</tr>
+</tbody></table></div>
+<p>Run Plan Ops Hub behind a TLS-terminating proxy or load balancer so people reach
+it over <code>https</code>.</p>
+<h2 id="who-can-sign-in">Who can sign in</h2>
+<p>Signing in at the identity provider isn&#39;t enough: the person must also be an
+<strong>active user in Plan Ops Hub</strong>, matched by email (not case-sensitive). That&#39;s
+where their skills and capacity come from. Keep the directory in step with your
+provider through <a href="users-and-routing.html">SCIM import</a>:</p>
+<ul>
+<li>People who aren&#39;t in the directory, or whose email isn&#39;t verified, see <em>You don&#39;t have access yet</em>. The refusal is audited as <code>user.sign-in-refused</code>.</li>
+<li><strong>Deactivating a user ends their access immediately</strong>, including sessions already open.</li>
+<li>Sign-ins and sign-outs are audited as <code>user.signed-in</code> and <code>user.signed-out</code>.</li>
+</ul>
+<h2 id="roles">Roles</h2>
+<p>Administrative actions need the <strong>admin</strong> role. Grant it with an identity
+provider group named <code>role:admin</code>, imported through SCIM like skill groups, or
+<code>&quot;roles&quot;: [&quot;admin&quot;]</code> in a direct import.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Needs admin</th>
+<th>Anyone signed in</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Import users (SCIM or JSON), activate or deactivate users</td>
+<td>Work their own tasks and hand them back to routing</td>
+</tr>
+<tr>
+<td>Cancel a case</td>
+<td>Start requests, view cases, rules, integrations and agents</td>
+</tr>
+<tr>
+<td>Test an integration&#39;s connection</td>
+<td>Ask Claude, approve agent proposals on their tasks</td>
+</tr>
+<tr>
+<td>Reassign someone else&#39;s task</td>
+<td></td>
+</tr>
+</tbody></table></div>
+<p>What work a person gets is still decided by their skills and levels, as before.
+The server enforces every rule; the UI hides controls a person can&#39;t use. The
+demo-only <em>Simulate TRAC outage</em> button doesn&#39;t exist with single sign-on.</p>
+<h2 id="how-it39s-protected">How it&#39;s protected</h2>
+<ul>
+<li><strong>Authorization code flow with PKCE</strong>, <code>state</code> bound to the browser by a short-lived cookie, and a <code>nonce</code> in the ID token, so a stolen or replayed sign-in link can&#39;t log someone in.</li>
+<li><strong>ID tokens are fully verified:</strong> signature against the provider&#39;s published keys (RS256/384/512, PS256, ES256/384; <code>none</code> and unknown keys are rejected), issuer, audience, expiry and nonce. Key rotation is picked up automatically.</li>
+<li><strong>Sessions are server-side.</strong> The browser holds a random token in an <code>HttpOnly</code>, <code>SameSite=Lax</code> cookie; the database stores only its SHA-256 hash.</li>
+<li><strong>Cross-site requests are refused:</strong> requests that change data must be JSON, and their <code>Origin</code> must be this site.</li>
+<li>After sign-in you return only to a page on this site.</li>
+<li>With single sign-on, the <code>x-user-id</code> header is ignored.</li>
+</ul>
+<h2 id="signing-out">Signing out</h2>
+<p><strong>Sign out</strong> (under your name in the sidebar) ends the Plan Ops Hub session.
+You may still be signed in at your identity provider, so the next sign-in can
+be immediate.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>You see</th>
+<th>Check</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><em>Single sign-on is configured but OIDC_CLIENT_ID… is not set</em> at startup</td>
+<td>All three required variables are set.</td>
+</tr>
+<tr>
+<td>The provider says the redirect URI doesn&#39;t match</td>
+<td><code>OIDC_REDIRECT_URI</code> matches the registered URI exactly, including <code>https</code> and path.</td>
+</tr>
+<tr>
+<td><em>You don&#39;t have access yet</em></td>
+<td>The person is in Plan Ops Hub, active, with the same email as at the provider.</td>
+</tr>
+<tr>
+<td><em>This sign-in was started in a different browser…</em></td>
+<td>The sign-in took more than 10 minutes, or cookies are blocked. Start again.</td>
+</tr>
+<tr>
+<td><em>ID token audience does not match</em></td>
+<td><code>OIDC_CLIENT_ID</code> is the ID of this application, not another one.</td>
+</tr>
+<tr>
+<td><em>Development mode (no sign-in) only listens on localhost</em></td>
+<td>Configure single sign-on before serving on a network.</td>
+</tr>
+</tbody></table></div>
+
+    <nav class="pager" aria-label="Previous and next">
+      <a href="users-and-routing.html"><small>Previous</small>Users and routing</a>
+      <a href="deployment.html" style="text-align:right"><small>Next</small>Deployment</a>
+    </nav>
+  </article>
+  <aside class="toc"><b>On this page</b><a href="#try-it-locally">Try it locally</a><a href="#set-up-your-identity-provider">Set up your identity provider</a><a href="#who-can-sign-in">Who can sign in</a><a href="#roles">Roles</a><a href="#how-it39s-protected">How it&amp;#39;s protected</a><a href="#signing-out">Signing out</a><a href="#troubleshooting">Troubleshooting</a></aside>
+</div>
+<script>
+  (function () {
+    function apply(choice) {
+      if (choice === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = choice;
+      document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.themeChoice === choice)); });
+      try { localStorage.setItem('planops.site.theme', choice); } catch (e) {}
+    }
+    document.querySelectorAll('[data-theme-choice]').forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.themeChoice); }); });
+    var saved = 'system';
+    try { saved = localStorage.getItem('planops.site.theme') || 'system'; } catch (e) {}
+    apply(saved);
+  })();
+</script>
+</body>
+</html>

@@ -38,6 +38,11 @@ deactivated. Importing re-runs routing, so waiting tasks go to newly qualified
 people straight away. The **Team & skills** screen does the same import from a
 pasted payload. For local testing, `config/users.json` seeds a sample team.
 
+The group `role:admin` grants the admin role (importing and deactivating users,
+cancelling cases, reassigning other people's tasks). Importing users needs the
+admin role. People sign in with the same email their user record has; see
+[Sign-in](sign-in.md). Deactivated users are signed out at once.
+
 ## How work is routed
 
 1. **Eligible:** active, holds the step's skill at or above its minimum level, and below capacity.
