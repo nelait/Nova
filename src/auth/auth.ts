@@ -19,6 +19,26 @@ export interface Session {
   saml?: SamlSessionRef;
 }
 
+/**
+ * An IdP-initiated SAML sign-in waiting for the person to confirm it. Keyed by
+ * the hash of a token held in a cookie set on this browser only.
+ */
+export interface PendingIdpSignIn {
+  id: string;
+  userId: string;
+  saml: SamlSessionRef;
+  returnTo: string;
+  expiresAt: string;
+}
+
+/** Outcome of a SAML response at the ACS. */
+export type SamlSignInResult =
+  | { kind: 'session'; token: string; returnTo: string; user: User }
+  /** Unsolicited: show "Continue as …?"; `token` goes in a cookie for /auth/saml/continue. */
+  | { kind: 'confirm'; token: string; returnTo: string; user: User; currentUser?: User }
+  /** Unsolicited, and this browser is already signed in as that person. */
+  | { kind: 'already'; returnTo: string };
+
 /** A back-channel logout token's jti, kept to refuse replays. */
 export interface SeenToken {
   id: string;
@@ -51,6 +71,7 @@ export class AuthService {
   private sessions: Collection<Session>;
   private requests: Collection<LoginRequest>;
   private seenTokens: Collection<SeenToken>;
+  private idpSignIns: Collection<PendingIdpSignIn>;
   private users: UserDirectory;
   private audit: (actor: string, entityId: string, event: string, detail?: unknown) => void;
   private now: () => Date;
@@ -62,6 +83,7 @@ export class AuthService {
     sessions: Collection<Session>;
     requests: Collection<LoginRequest>;
     seenTokens: Collection<SeenToken>;
+    idpSignIns: Collection<PendingIdpSignIn>;
     users: UserDirectory;
     audit: (actor: string, entityId: string, event: string, detail?: unknown) => void;
     now: () => Date;
@@ -74,6 +96,7 @@ export class AuthService {
     this.sessions = opts.sessions;
     this.requests = opts.requests;
     this.seenTokens = opts.seenTokens;
+    this.idpSignIns = opts.idpSignIns;
     this.users = opts.users;
     this.audit = opts.audit;
     this.now = opts.now;
@@ -113,26 +136,75 @@ export class AuthService {
   }
 
   /** Map the identity the provider vouched for to an active directory user and open a session. */
-  private openSession(value: string, by: 'email' | 'id', via: AuthMode, returnTo: string, idp: Pick<Session, 'oidc' | 'saml'>): { token: string; returnTo: string; user: User } {
+  /** The active directory user the provider vouched for, or a refusal (audited). */
+  private activeUser(value: string, by: 'email' | 'id', via: AuthMode): User {
     const user = by === 'email' ? this.users.byEmail(value) : this.users.list().find((u) => u.id === value);
     if (!user || !user.active) {
       this.audit('auth', value, 'user.sign-in-refused', { reason: user ? 'inactive' : 'not provisioned', via });
       throw new AuthError(`${value} is not set up in Plan Ops Hub, or the account is deactivated. Ask an administrator to add you.`, 403);
     }
+    return user;
+  }
+
+  private openSession(value: string, by: 'email' | 'id', via: AuthMode, returnTo: string, idp: Pick<Session, 'oidc' | 'saml'>, detail: Record<string, unknown> = {}): { token: string; returnTo: string; user: User } {
+    const user = this.activeUser(value, by, via);
     const token = randomToken();
     const createdAt = this.now();
     this.sessions.insert({ id: hash(token), userId: user.id, createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + this.ttlMs).toISOString(), ...idp });
-    this.audit(user.id, user.id, 'user.signed-in', { via });
+    this.audit(user.id, user.id, 'user.signed-in', { via, ...detail });
     return { token, returnTo, user };
   }
 
   /** Finish SAML sign-in from the posted SAMLResponse and RelayState. */
-  async finishSamlLogin(samlResponse: unknown, relayState: unknown, browserState: string | undefined): Promise<{ token: string; returnTo: string; user: User }> {
+  /**
+   * A SAML response at the ACS.
+   *
+   * SP-initiated (the RelayState is a sign-in this browser started): the response
+   * must answer that request, and the session opens.
+   *
+   * IdP-initiated (unsolicited; only with SAML_ALLOW_IDP_INITIATED): nothing ties the
+   * response to this browser, so someone could post their own valid assertion into
+   * another person's browser and have them work in the wrong account (login CSRF).
+   * So no session opens yet: the person confirms "Continue as …?", and only this
+   * browser (holding the cookie set with that page) can confirm.
+   */
+  async finishSamlLogin(samlResponse: unknown, relayState: unknown, browserState: string | undefined, currentSession?: string): Promise<SamlSignInResult> {
     if (!this.saml) throw new AuthError('SAML sign-in is not configured', 404);
     if (typeof samlResponse !== 'string' || !samlResponse) throw new AuthError('Sign-in response is missing its SAMLResponse', 400);
-    const req = this.takeRequest(relayState, browserState);
-    const { email, ref } = await this.saml.verify(samlResponse);
-    return this.openSession(email, 'email', 'saml', req.returnTo, { saml: ref });
+    const pending = typeof relayState === 'string' && relayState ? this.requests.get(relayState) : undefined;
+    // A sign-in this browser didn't start is refused before the response is looked at.
+    if (pending && browserState !== pending.id) throw new AuthError('This sign-in was started in a different browser or has already been used. Start again.', 400);
+    const req = pending ? this.takeRequest(relayState, browserState) : undefined;
+    const { email, ref, solicited } = await this.saml.verify(samlResponse);
+    if (solicited) {
+      // Answers some request: it must be the one this browser started.
+      if (!req) throw new AuthError('This sign-in was started in a different browser or has already been used. Start again.', 400);
+      return { kind: 'session', ...this.openSession(email, 'email', 'saml', req.returnTo, { saml: ref }) };
+    }
+    // Unsolicited (also if one is posted into a sign-in this browser started).
+    const user = this.activeUser(email, 'email', 'saml');
+    const returnTo = req?.returnTo ?? safeReturnTo(relayState);
+    const current = this.userFor(currentSession);
+    if (current?.id === user.id) return { kind: 'already', returnTo };
+    const now = this.now();
+    for (const old of this.idpSignIns.find((p) => p.expiresAt < now.toISOString())) this.idpSignIns.delete(old.id);
+    const token = randomToken();
+    this.idpSignIns.insert({ id: hash(token), userId: user.id, saml: ref, returnTo, expiresAt: new Date(now.getTime() + 120_000).toISOString() });
+    return { kind: 'confirm', token, returnTo, user, currentUser: current };
+  }
+
+  /** The person confirmed an IdP-initiated sign-in on this browser: open the session. */
+  confirmIdpSignIn(token: string | undefined): { token: string; returnTo: string; user: User } {
+    const p = token ? this.idpSignIns.get(hash(token)) : undefined;
+    if (!p) throw new AuthError('This sign-in has expired or was already used. Open Plan Ops Hub from your identity provider again.', 400);
+    this.idpSignIns.delete(p.id); // single use
+    if (p.expiresAt < this.now().toISOString()) throw new AuthError('This sign-in has expired. Open Plan Ops Hub from your identity provider again.', 400);
+    return this.openSession(p.userId, 'id', 'saml', p.returnTo, { saml: p.saml }, { idpInitiated: true });
+  }
+
+  /** The person declined an IdP-initiated sign-in. */
+  cancelIdpSignIn(token: string | undefined): void {
+    if (token) this.idpSignIns.delete(hash(token));
   }
 
   /**

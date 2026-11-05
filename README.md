@@ -105,7 +105,7 @@ written to disk.
 
 ```bash
 npm run demo:sso     # demo plus a mock OpenID Connect provider on :3201
-npm run demo:saml    # demo plus a mock SAML 2.0 provider on :3202
+npm run demo:saml    # demo plus a mock SAML 2.0 provider on :3202 (app portal: http://localhost:3202/sso?portal)
 ```
 
 In production, set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` (and

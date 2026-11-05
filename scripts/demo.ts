@@ -26,6 +26,7 @@ if (process.argv.includes('--saml')) {
   // The app's signing key for logout requests (in production: SAML_SP_PRIVATE_KEY / SAML_SP_CERT).
   const sp = generateKeyPairSync('rsa', { modulusLength: 2048 });
   idp.spCertPem = sp.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  idp.sp = { acsUrl: `http://localhost:${port}/auth/saml/acs`, entityId: `http://localhost:${port}/auth/saml/metadata` };
   idp.listen(idpPort);
   Object.assign(process.env, {
     SAML_IDP_SSO_URL: idp.ssoUrl,
@@ -35,9 +36,10 @@ if (process.argv.includes('--saml')) {
     SAML_IDP_SLO_URL: idp.sloUrl,
     SAML_SP_PRIVATE_KEY: sp.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
     SAML_SP_CERT: idp.spCertPem,
+    SAML_ALLOW_IDP_INITIATED: 'true',
     HOST: process.env.HOST ?? '127.0.0.1',
   });
-  console.log(`Mock SAML identity provider on ${idp.ssoUrl} (development only); its sessions: http://localhost:${idpPort}/sessions`);
+  console.log(`Mock SAML identity provider on ${idp.ssoUrl} (development only); its sessions: http://localhost:${idpPort}/sessions; app portal: http://localhost:${idpPort}/sso?portal`);
 }
 if (process.argv.includes('--sso')) {
   const idpPort = Number(process.env.IDP_PORT ?? 3201);

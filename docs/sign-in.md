@@ -93,12 +93,29 @@ Then set these environment variables and restart:
 | `SAML_SP_ENTITY_ID` | no | This app's entity ID. Default: `<your address>/auth/saml/metadata`. |
 | `SAML_USER_ATTRIBUTE` | no | Attribute holding the email, if not one of the usual ones. |
 | `SAML_WANT_RESPONSE_SIGNED` | no | `true` to also require the whole response to be signed. Default: only the assertion must be signed. |
+| `SAML_ALLOW_IDP_INITIATED` | no | `true` to accept sign-ins started from the provider's app portal. Default: off. See below. |
 
-Only sign-ins started from Plan Ops Hub are accepted. Starting from the
-provider's app dashboard (IdP-initiated sign-in) is refused, because an
-unsolicited assertion can't be tied to the browser that receives it. Set the
-dashboard tile to open `https://<your address>/auth/login` instead (Okta and
-Entra ID call this a *bookmark* or *sign-on URL*).
+### Starting from the provider's app portal (IdP-initiated sign-in)
+
+By default, sign-in must start from Plan Ops Hub. If people open it from an app
+portal such as Okta's dashboard, Microsoft My Apps or an ADFS sign-on page, you
+have two options:
+
+- **Recommended:** set the portal tile to open `https://<your address>/auth/login` (Okta: *Login initiated by: Either Okta or App* with the *Initiate login URI*; Entra ID: the *Sign-on URL*). The tile then starts a normal SP-initiated sign-in, which needs no further setting.
+- **IdP-initiated:** set `SAML_ALLOW_IDP_INITIATED=true`. The provider then posts an unsolicited assertion straight to Plan Ops Hub.
+
+An unsolicited assertion can't be tied to the browser that receives it, so
+anyone with a valid assertion of their own could post it into someone else's
+browser and have them unknowingly work in the wrong account (*login CSRF*).
+Plan Ops Hub therefore asks first:
+
+> **Continue to Plan Ops Hub?** Your identity provider is signing you in as Dana Kim (dana@example.com). If that isn't you, cancel.
+
+- No session opens until the person clicks **Continue**. That button only works on this site's own page, in the browser that received the assertion (it holds a 2-minute cookie set with the page), so an attacker can't press it remotely.
+- If the browser is already signed in as the same person, they go straight in. If it's signed in as someone else, the page asks whether to switch.
+- Unsolicited assertions must have been issued in the last 5 minutes, and every assertion (solicited or not) is accepted once.
+- The provider's RelayState, if it is a path on this site such as `/cases`, is where the person lands.
+- Sign-ins started from Plan Ops Hub work exactly as before. A captured response to one can't be passed off as unsolicited: the request it answers is recorded inside the signed assertion, and must match.
 
 ## Who can sign in
 
@@ -137,7 +154,7 @@ demo-only *Simulate TRAC outage* button doesn't exist with single sign-on.
 
 - **Authorization code flow with PKCE**, `state` bound to the browser by a short-lived cookie, and a `nonce` in the ID token, so a stolen or replayed sign-in link can't log someone in.
 - **ID tokens are fully verified:** signature against the provider's published keys (RS256/384/512, PS256, ES256/384; `none` and unknown keys are rejected), issuer, audience, expiry and nonce. Key rotation is picked up automatically.
-- **SAML assertions are verified by [node-saml](https://github.com/node-saml/node-saml)**, the library behind passport-saml, rather than hand-written XML signature code, which is a classic source of signature-wrapping bugs. The assertion must be signed by the configured certificate (SHA-256), issued by the configured IdP entity ID, addressed to this app (audience, Recipient and Destination), unexpired, and in response to a request this browser made in the last 10 minutes. Each response is accepted once. Tests cover tampered, unsigned, re-signed, wrapped, replayed, misaddressed and unsolicited assertions.
+- **SAML assertions are verified by [node-saml](https://github.com/node-saml/node-saml)**, the library behind passport-saml, rather than hand-written XML signature code, which is a classic source of signature-wrapping bugs. The assertion must be signed by the configured certificate (SHA-256), issued by the configured IdP entity ID, addressed to this app (audience, Recipient and Destination), unexpired, and in response to a request this browser made in the last 10 minutes (or, only if you allow IdP-initiated sign-in, unsolicited, under 5 minutes old, and confirmed by the person). Each assertion is accepted once. Tests cover tampered, unsigned, re-signed, wrapped, replayed, misaddressed and unsolicited assertions, and login CSRF.
 - **Single logout** messages from the provider are verified as strictly as sign-ins; see [What protects logout](#what-protects-logout).
 - **Sessions are server-side.** The browser holds a random token in an `HttpOnly`, `SameSite=Lax` cookie; the database stores only its SHA-256 hash.
 - **Cross-site requests are refused:** requests that change data must be JSON, and their `Origin` must be this site.
@@ -207,7 +224,9 @@ identity provider after signing out here, so the next sign-in can be immediate.
 | *SAML response was rejected: Invalid signature* | `SAML_IDP_CERT` is the provider's current signing certificate. During rollover, set both certificates. |
 | *SAML assertion audience mismatch* | The entity ID registered at the provider equals `SAML_SP_ENTITY_ID` (default `<your address>/auth/saml/metadata`). |
 | *…issued by …, not the configured identity provider* | `SAML_IDP_ENTITY_ID` matches the provider's issuer exactly. |
-| *InResponseTo is missing* or *…not valid* after clicking the app tile | IdP-initiated sign-in isn't supported. Point the tile at `/auth/login`. |
+| *…unsolicited (IdP-initiated) SAML responses are turned off* after clicking the app tile | Point the tile at `/auth/login`, or set `SAML_ALLOW_IDP_INITIATED=true`. |
+| *This sign-in from the identity provider is too old* | The portal page was left open; open the app from the portal again. Check the server clock if it keeps happening. |
+| *This sign-in has expired or was already used* on **Continue** | The confirmation page was open for more than 2 minutes, was already used, or cookies are blocked. Open the app from the portal again. |
 | *The SAML assertion has no email attribute* | Send the email as the NameID or an attribute, or set `SAML_USER_ATTRIBUTE`. |
 | After signing out, the provider says the redirect URI isn't allowed | Register `https://<your address>/auth/signed-out` as a sign-out redirect URI, or set `OIDC_POST_LOGOUT_REDIRECT_URI` to one you have registered. |
 | *…didn't confirm that it signed you out too* | The provider's LogoutResponse couldn't be verified (often a changed certificate). Plan Ops Hub's session has ended regardless. |

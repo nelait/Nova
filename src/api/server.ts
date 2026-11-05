@@ -213,6 +213,8 @@ function send(res: ServerResponse, status: number, data: unknown) {
 
 const SESSION_COOKIE = 'planops_session';
 const LOGIN_COOKIE = 'planops_login';
+/** Holds a pending IdP-initiated SAML sign-in until the person confirms it (2 minutes). */
+const IDP_SIGNIN_COOKIE = 'planops_idp_signin';
 
 function cookies(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
@@ -242,14 +244,15 @@ async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
 }
 
 /** Small themed HTML page for sign-in outcomes. */
-function page(res: ServerResponse, status: number, title: string, message: string, action?: { href: string; label: string }) {
+function page(res: ServerResponse, status: number, title: string, message: string, action?: { href: string; label: string }, formsHtml = '', headers: Record<string, string | string[]> = {}) {
   const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers });
   res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)} · Plan Ops Hub</title>
 <link rel="stylesheet" href="/theme.css"><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:16px/1.55 var(--font-body);padding:24px}
 main{max-width:30em;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:28px}h1{font:600 24px/1.2 var(--font-display);margin:0 0 10px}
-a{display:inline-block;margin-top:14px;background:var(--accent);color:var(--accent-ink);padding:9px 16px;border-radius:6px;text-decoration:none;font-weight:700}</style></head>
-<body><main><h1>${esc(title)}</h1><p>${esc(message)}</p>${action ? `<a href="${esc(action.href)}">${esc(action.label)}</a>` : ''}</main></body></html>`);
+a,button{display:inline-block;margin-top:14px;background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);padding:9px 16px;border-radius:6px;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}
+.forms{display:flex;gap:10px;flex-wrap:wrap}.forms form{margin:0}button.secondary{background:var(--surface);color:var(--ink);border-color:var(--line)}</style></head>
+<body><main><h1>${esc(title)}</h1><p>${esc(message)}</p>${formsHtml}${action ? `<a href="${esc(action.href)}">${esc(action.label)}</a>` : ''}</main></body></html>`);
 }
 
 /** Requests that change data must be JSON from this app's own pages (blocks cross-site forms and scripts). */
@@ -278,11 +281,28 @@ async function handleAuth(app: App, req: IncomingMessage, res: ServerResponse, u
   if (saml && req.method === 'POST' && url.pathname === '/auth/saml/acs') {
     try {
       const form = await readForm(req);
-      const { token, returnTo } = await auth.finishSamlLogin(form.get('SAMLResponse'), form.get('RelayState'), cookies(req)[LOGIN_COOKIE]);
+      const result = await auth.finishSamlLogin(form.get('SAMLResponse'), form.get('RelayState'), cookies(req)[LOGIN_COOKIE], cookies(req)[SESSION_COOKIE]);
+      if (result.kind === 'confirm') {
+        // IdP-initiated: no session until the person confirms, on this browser.
+        const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+        const who = `${result.user.name} (${result.user.email})`;
+        return page(
+          res,
+          200,
+          'Continue to Plan Ops Hub?',
+          result.currentUser
+            ? `You're signed in as ${result.currentUser.name}. Your identity provider is signing you in as ${who}. Switch to that account?`
+            : `Your identity provider is signing you in as ${who}. If that isn't you, cancel.`,
+          undefined,
+          `<div class="forms"><form method="post" action="/auth/saml/continue"><button type="submit" autofocus>Continue as ${esc(result.user.name)}</button></form>` +
+            `<form method="post" action="/auth/saml/cancel"><button type="submit" class="secondary">Cancel</button></form></div>`,
+          { 'set-cookie': [cookie(IDP_SIGNIN_COOKIE, result.token, 120, secure), cookie(LOGIN_COOKIE, '', 0, secure, 'None')] },
+        );
+      }
       // 303: follow with a GET. The session cookie is Lax; the redirect is a top-level navigation, so it is sent.
       res.writeHead(303, {
-        location: returnTo,
-        'set-cookie': [cookie(SESSION_COOKIE, token, auth.sessionSeconds, secure), cookie(LOGIN_COOKIE, '', 0, secure, 'None')],
+        location: result.returnTo,
+        'set-cookie': result.kind === 'session' ? [cookie(SESSION_COOKIE, result.token, auth.sessionSeconds, secure), cookie(LOGIN_COOKIE, '', 0, secure, 'None')] : cookie(LOGIN_COOKIE, '', 0, secure, 'None'),
         'cache-control': 'no-store',
       });
       return void res.end();
@@ -290,6 +310,25 @@ async function handleAuth(app: App, req: IncomingMessage, res: ServerResponse, u
       if (!(e instanceof AuthError)) throw e;
       res.setHeader('set-cookie', cookie(LOGIN_COOKIE, '', 0, secure, 'None'));
       return page(res, e.status === 403 ? 403 : 400, e.status === 403 ? 'You don’t have access yet' : 'Sign-in failed', e.message, e.status === 403 ? undefined : { href: '/auth/login', label: 'Sign in again' });
+    }
+  }
+  // Confirming or cancelling an IdP-initiated sign-in: only from this site's own page,
+  // on the browser holding the cookie that page set.
+  if (saml && req.method === 'POST' && (url.pathname === '/auth/saml/continue' || url.pathname === '/auth/saml/cancel')) {
+    const origin = req.headers.origin;
+    if (!origin || new URL(origin).host !== req.headers.host) return page(res, 403, 'Sign-in refused', 'This confirmation must come from the Plan Ops Hub page that asked for it.');
+    const pending = cookies(req)[IDP_SIGNIN_COOKIE];
+    if (url.pathname === '/auth/saml/cancel') {
+      auth.cancelIdpSignIn(pending);
+      return page(res, 200, 'Sign-in cancelled', 'You were not signed in to Plan Ops Hub.', { href: '/auth/login', label: 'Sign in' }, '', { 'set-cookie': cookie(IDP_SIGNIN_COOKIE, '', 0, secure) });
+    }
+    try {
+      const { token, returnTo } = auth.confirmIdpSignIn(pending);
+      res.writeHead(303, { location: returnTo, 'set-cookie': [cookie(SESSION_COOKIE, token, auth.sessionSeconds, secure), cookie(IDP_SIGNIN_COOKIE, '', 0, secure)], 'cache-control': 'no-store' });
+      return void res.end();
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      return page(res, e.status === 403 ? 403 : 400, e.status === 403 ? 'You don’t have access yet' : 'Sign-in failed', e.message, undefined, '', { 'set-cookie': cookie(IDP_SIGNIN_COOKIE, '', 0, secure) });
     }
   }
   if (!saml && req.method === 'GET' && url.pathname === '/auth/callback') {

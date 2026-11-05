@@ -15,8 +15,10 @@ import { AuthError } from './oidc.ts';
  * signature-wrapping bugs. On top of it this module requires:
  * - a signed assertion for this SP's audience, issued by the configured IdP entity ID
  *   (checked here: node-saml only checks the issuer of logout messages);
- * - a response to a request this app sent (InResponseTo, single use, 10 minutes):
- *   unsolicited (IdP-initiated) responses are refused;
+ * - a response to a request this app sent (InResponseTo, single use, 10 minutes),
+ *   or, only with SAML_ALLOW_IDP_INITIATED, an unsolicited (IdP-initiated) one
+ *   issued in the last 5 minutes, which the user must then confirm (see AuthService);
+ * - each assertion ID accepted once, solicited or not;
  * - Destination and Recipient, when present, equal to this app's ACS URL.
  */
 export interface SamlConfig {
@@ -41,7 +43,12 @@ export interface SamlConfig {
   /** This app's signing key and certificate (PEM): logout requests must be signed. */
   spPrivateKey?: string;
   spCert?: string;
+  /** Accept unsolicited (IdP-initiated) responses, e.g. from an app tile in the IdP's portal. */
+  allowIdpInitiated: boolean;
 }
+
+/** Unsolicited assertions must be this fresh. */
+const UNSOLICITED_MAX_AGE_MS = 300_000;
 
 /** What identifies a user's session at the IdP, kept with the local session for logout. */
 export interface SamlSessionRef {
@@ -114,11 +121,17 @@ export class SamlClient {
   readonly config: SamlConfig;
   private saml: SAML;
   private seen: Collection<PendingSamlRequest>;
+  private seenAssertions: Collection<PendingSamlRequest>;
   private now: () => number;
 
-  constructor(config: SamlConfig, store: { requests: Collection<PendingSamlRequest>; seenLogouts: Collection<PendingSamlRequest> }, now: () => number = Date.now) {
+  constructor(
+    config: SamlConfig,
+    store: { requests: Collection<PendingSamlRequest>; seenLogouts: Collection<PendingSamlRequest>; seenAssertions: Collection<PendingSamlRequest> },
+    now: () => number = Date.now,
+  ) {
     this.config = config;
     this.seen = store.seenLogouts;
+    this.seenAssertions = store.seenAssertions;
     this.now = now;
     const requests = store.requests;
     this.saml = new SAML({
@@ -133,7 +146,9 @@ export class SamlClient {
       idpIssuer: config.idpEntityId,
       wantAssertionsSigned: true,
       wantAuthnResponseSigned: config.wantResponseSigned,
-      validateInResponseTo: ValidateInResponseTo.always,
+      // With IdP-initiated sign-in on, node-saml checks InResponseTo only when the
+      // (unsigned) Response carries one; checkAssertion() closes that gap.
+      validateInResponseTo: config.allowIdpInitiated ? ValidateInResponseTo.ifPresent : ValidateInResponseTo.always,
       requestIdExpirationPeriodMs: REQUEST_TTL_MS,
       cacheProvider: new CollectionCache(requests, now),
       acceptedClockSkewMs: 60_000,
@@ -255,7 +270,7 @@ export class SamlClient {
   }
 
   /** Validate a posted SAMLResponse and return the user's email. */
-  async verify(samlResponse: string): Promise<{ email: string; profile: Profile; ref: SamlSessionRef }> {
+  async verify(samlResponse: string): Promise<{ email: string; profile: Profile; ref: SamlSessionRef; solicited: boolean }> {
     let profile: Profile | null;
     try {
       ({ profile } = await this.saml.validatePostResponseAsync({ SAMLResponse: samlResponse }));
@@ -263,21 +278,27 @@ export class SamlClient {
       throw new AuthError(`The identity provider's SAML response was rejected: ${(e as Error).message}`, 400);
     }
     if (!profile) throw new AuthError('The identity provider sent a sign-out message, not a sign-in', 400);
-    this.checkRecipients(samlResponse, profile);
+    const { solicited } = this.checkAssertion(samlResponse, profile);
     const email = this.emailFrom(profile);
     if (!email) throw new AuthError(`The SAML assertion has no ${this.config.userAttribute ? `"${this.config.userAttribute}" attribute` : 'email attribute or email NameID'}`, 403);
     const ref: SamlSessionRef = { nameID: profile.nameID, nameIDFormat: profile.nameIDFormat, sessionIndex: profile.sessionIndex };
     if (profile.nameQualifier) ref.nameQualifier = profile.nameQualifier;
     if (profile.spNameQualifier) ref.spNameQualifier = profile.spNameQualifier;
-    return { email, profile, ref };
+    return { email, profile, ref, solicited };
   }
 
   /**
-   * Checks node-saml leaves to the caller: the signed assertion's Issuer must be the
-   * configured IdP (node-saml checks idpIssuer only on logout messages), and
-   * Destination / Recipient, when present, must name this app.
+   * Checks node-saml leaves to the caller:
+   * - the signed assertion's Issuer is the configured IdP (node-saml checks
+   *   idpIssuer only on logout messages);
+   * - Destination / Recipient, when present, name this app;
+   * - the InResponseTo on the (unsigned) Response equals the one inside the signed
+   *   assertion. node-saml validates the Response's, so without this, stripping it
+   *   from a captured SP-initiated response would pass it off as unsolicited;
+   * - unsolicited assertions are allowed by configuration and fresh;
+   * - each assertion ID is accepted once.
    */
-  private checkRecipients(samlResponse: string, profile: Profile): void {
+  private checkAssertion(samlResponse: string, profile: Profile): { solicited: boolean } {
     if (profile.issuer !== this.config.idpEntityId) throw new AuthError(`SAML assertion was issued by ${profile.issuer}, not the configured identity provider`, 400);
     const parser = new DOMParser();
     const response = parser.parseFromString(Buffer.from(samlResponse, 'base64').toString('utf8'), 'text/xml').documentElement;
@@ -288,10 +309,34 @@ export class SamlClient {
     if (!assertionXml) throw new AuthError('SAML assertion is missing', 400);
     const assertion = parser.parseFromString(assertionXml, 'text/xml');
     const confirmations = assertion.getElementsByTagNameNS(NS_ASSERTION, 'SubjectConfirmationData');
+    const signedIrt = new Set<string>();
     for (let i = 0; i < confirmations.length; i++) {
       const recipient = confirmations[i].getAttribute('Recipient');
       if (recipient && recipient !== this.config.acsUrl) throw new AuthError(`SAML assertion is for ${recipient}, not this application`, 400);
+      const irt = confirmations[i].getAttribute('InResponseTo');
+      if (irt) signedIrt.add(irt);
     }
+    const responseIrt = response?.getAttribute('InResponseTo') || '';
+    if (signedIrt.size > 1 || (signedIrt.size === 1 && !signedIrt.has(responseIrt)) || (signedIrt.size === 0 && responseIrt)) {
+      throw new AuthError('SAML response and assertion disagree about which request they answer', 400);
+    }
+    const solicited = signedIrt.size === 1;
+
+    const root = assertion.documentElement;
+    const assertionId = root?.getAttribute('ID') || '';
+    const issued = Date.parse(root?.getAttribute('IssueInstant') ?? '');
+    if (!assertionId) throw new AuthError('SAML assertion has no ID', 400);
+    if (!solicited) {
+      if (!this.config.allowIdpInitiated) throw new AuthError('Sign-in must start from Plan Ops Hub: unsolicited (IdP-initiated) SAML responses are turned off', 400);
+      if (!Number.isFinite(issued) || this.now() - issued > UNSOLICITED_MAX_AGE_MS || issued - this.now() > 60_000) {
+        throw new AuthError('This sign-in from the identity provider is too old. Open Plan Ops Hub from the provider again.', 400);
+      }
+    }
+    const cutoff = this.now() - 4 * UNSOLICITED_MAX_AGE_MS;
+    for (const old of this.seenAssertions.find((r) => r.createdAt < cutoff)) this.seenAssertions.delete(old.id);
+    if (this.seenAssertions.get(assertionId)) throw new AuthError('This SAML assertion was already used', 400);
+    this.seenAssertions.insert({ id: assertionId, value: profile.nameID, createdAt: this.now() });
+    return { solicited };
   }
 
   private emailFrom(profile: Profile): string | undefined {
@@ -339,6 +384,7 @@ export function samlConfigFromEnv(env: Record<string, string | undefined>): Saml
     sloUrl: `${acs.origin}${acs.pathname.replace(/\/acs$/, '/slo')}`,
     spPrivateKey: pem(env.SAML_SP_PRIVATE_KEY),
     spCert: pem(env.SAML_SP_CERT),
+    allowIdpInitiated: env.SAML_ALLOW_IDP_INITIATED === 'true',
   };
 }
 

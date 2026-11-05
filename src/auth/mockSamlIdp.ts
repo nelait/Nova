@@ -26,6 +26,14 @@ export interface SamlResponseOptions {
   unsigned?: boolean;
   /** Edit the XML after signing (to prove tampering is caught). */
   tamper?: (xml: string) => string;
+  /** Pretend the assertion was issued this many seconds ago. */
+  issuedAgoSeconds?: number;
+}
+
+/** The app as this IdP knows it, for IdP-initiated sign-in (the app tile in a portal). */
+export interface MockServiceProvider {
+  acsUrl: string;
+  entityId: string;
 }
 
 const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -42,6 +50,8 @@ export class MockSamlIdp {
   readonly sloUrl: string;
   /** The app's signing key (its SAML_SP_CERT), to check the app's LogoutRequests. */
   spCertPem?: string;
+  /** The app, for IdP-initiated sign-in from the demo portal page. */
+  sp?: MockServiceProvider;
   /** Sessions this IdP issued: SessionIndex -> person, plus where to send logout. */
   readonly sessions = new Map<string, { person: MockPerson; spSloUrl: string }>();
   private privateKey: KeyObject;
@@ -67,9 +77,17 @@ export class MockSamlIdp {
 
   /** The signed-in step: a base64 SAMLResponse for `email`, answering the request in `authorizationUrl`. */
   respond(authorizationUrl: string, email: string, o: SamlResponseOptions = {}): { acsUrl: string; SAMLResponse: string; RelayState: string; sessionIndex: string } {
-    const req = this.parseRequest(authorizationUrl);
+    return this.build(this.parseRequest(authorizationUrl), email, o);
+  }
+
+  /** IdP-initiated: an unsolicited response (no InResponseTo), as when someone clicks the app's tile. */
+  unsolicited(sp: MockServiceProvider, email: string, o: SamlResponseOptions & { relayState?: string } = {}) {
+    return this.build({ requestId: '', acsUrl: sp.acsUrl, spEntityId: sp.entityId, relayState: o.relayState ?? '' }, email, { inResponseTo: null, ...o });
+  }
+
+  private build(req: { requestId: string; acsUrl: string; spEntityId: string; relayState: string }, email: string, o: SamlResponseOptions) {
     const person = this.people.find((p) => p.email === email) ?? { email, name: email };
-    const now = Date.now();
+    const now = Date.now() - (o.issuedAgoSeconds ?? 0) * 1000;
     const until = iso(now + (o.validFor ?? 300) * 1000);
     const inResponseTo = o.inResponseTo === undefined ? req.requestId : o.inResponseTo;
     const irt = inResponseTo === null ? '' : ` InResponseTo="${xmlEsc(inResponseTo)}"`;
@@ -202,14 +220,23 @@ export class MockSamlIdp {
         return void res.end();
       }
       const as = url.searchParams.get('login_as');
+      const launch = url.searchParams.get('launch_as');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       const style = '<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32em;margin:40px auto;padding:0 16px;background:#eef1f6;color:#1d2321}a{display:block;padding:10px 14px;margin:8px 0;border:1px solid #b9c2d0;border-radius:8px;background:#fff;color:inherit;text-decoration:none}a:hover{border-color:#2b4c7e}small{color:#666}</style>';
+      const autopost = (r: { acsUrl: string; SAMLResponse: string; RelayState: string }) =>
+        `<!doctype html><title>Signing in…</title>${style}<form method="post" action="${esc(r.acsUrl)}"><input type="hidden" name="SAMLResponse" value="${esc(r.SAMLResponse)}">${r.RelayState ? `<input type="hidden" name="RelayState" value="${esc(r.RelayState)}">` : ''}<noscript><button>Continue</button></noscript></form><script>document.forms[0].submit()</script>`;
+      if (launch && this.sp) return void res.end(autopost(this.unsolicited(this.sp, launch, { relayState: '/' })));
+      if (url.searchParams.has('portal') && this.sp) {
+        const tile = (email: string) => `${esc(url.pathname)}?portal&amp;launch_as=${encodeURIComponent(email)}`;
+        return void res.end(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock SAML portal</title>${style}
+<h1>My apps</h1><p><small>Development only. This stands in for an app portal such as Okta's dashboard or Microsoft My Apps: opening the app from here is IdP-initiated sign-in.</small></p>
+<p>Open <b>Plan Ops Hub</b> as:</p>${this.people.map((p) => `<a href="${tile(p.email)}"><b>${esc(p.name)}</b><br><small>${esc(p.email)}</small></a>`).join('')}`);
+      }
       if (as) {
         try {
           const params = new URL(url);
           params.searchParams.delete('login_as');
-          const r = this.respond(params.toString(), as);
-          return void res.end(`<!doctype html><title>Signing in…</title>${style}<form method="post" action="${esc(r.acsUrl)}"><input type="hidden" name="SAMLResponse" value="${esc(r.SAMLResponse)}"><input type="hidden" name="RelayState" value="${esc(r.RelayState)}"><noscript><button>Continue</button></noscript></form><script>document.forms[0].submit()</script>`);
+          return void res.end(autopost(this.respond(params.toString(), as)));
         } catch (e) {
           return void res.end(`Bad SAML request: ${esc(String((e as Error).message))}`);
         }
