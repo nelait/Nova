@@ -16,6 +16,18 @@ advisory only and can't change which steps run or who receives an email.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
+## Screenshots
+
+From `npm run demo` (fictional sponsors; the Claude panels show labeled sample responses because no API key was set).
+
+| | |
+|---|---|
+| ![Fee disclosure with Claude's draft](docs/screenshots/01-inbox-claude-draft.png) **My work:** a 408(b)(2) disclosure with guidance, Claude's briefing and rewritten draft | ![Contact change flagged](docs/screenshots/02-contact-change-risk.png) **Contact change:** Claude flags a new admin email on a free-mail domain |
+| ![Validation exception](docs/screenshots/03-validation-exception.png) **Exception:** bad EIN and two QDIAs routed to a person to fix, retry or override | ![Termination fees](docs/screenshots/04-termination-fees.png) **Termination:** fee calculation for review, with a blackout-notice timing risk |
+| ![Case detail](docs/screenshots/05-case-detail.png) **Cases:** step status, assignees and the audit trail | ![Insights](docs/screenshots/10-insights.png) **Insights:** step metrics and suggested process changes |
+
+More: [paper intake](docs/screenshots/06-new-request-paper.png), [team & skills](docs/screenshots/07-team-skills.png), [recordkeeper](docs/screenshots/08-recordkeeper.png), [outbox](docs/screenshots/09-outbox.png), [phone](docs/screenshots/11-mobile-task.png).
+
 ## Run
 
 Requires Node.js 22.18+. Node runs the TypeScript directly and uses its built-in SQLite.
@@ -42,6 +54,20 @@ task and reused until the task's data changes, and every call is recorded in the
 audit trail with its token usage. Plan and contact data from the case is sent to
 the Anthropic API, so check that this fits your data-handling policy before
 turning it on.
+
+### Demo with sample data
+
+```bash
+npm run demo         # http://localhost:3000
+```
+
+Loads 14 cases for fictional sponsors into an in-memory database: completed
+installations (digital and paper), fee and contact changes, a termination in
+progress, a suspicious contact change, a fund change, and an installation stuck
+on bad data. Every specialist has work waiting; switch users with the picker.
+Without an API key the Claude panel shows canned responses marked as sample
+data; with `ANTHROPIC_API_KEY` set, **Regenerate** calls Claude. Nothing is
+written to disk.
 
 ### Try it
 
@@ -74,6 +100,7 @@ src/
   ai/          Claude assistance (prompt, structured output, caching, guardrails)
   api/         HTTP API
 public/        single-page UI (no build step)
+scripts/       demo data and demo server
 test/          end-to-end tests
 ```
 

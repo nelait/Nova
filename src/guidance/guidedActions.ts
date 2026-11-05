@@ -90,7 +90,6 @@ function alertsFor(task: Task, prepared: PreparedAction | undefined, ctx: Action
     if (missing.length) alerts.push(`Draft has missing fields: ${[...new Set(missing)].join(', ')}`);
     if (prepared.to.length === 0) alerts.push('No recipient: the plan has no contact for the required role');
   }
-  if (prepared?.kind === 'check' && prepared.issues.length) alerts.push(...prepared.issues.map((i) => `Data issue: ${i}`));
   if (prepared?.kind === 'calculation' && prepared.result.planAssetsUsd === 0) alerts.push('Plan assets are 0; the asset-based fee will be $0. Confirm the assets with the recordkeeper.');
   if (ctx.kase.type === 'TERMINATION' && ctx.kase.request.blackoutStart) {
     const days = Math.floor((new Date(String(ctx.kase.request.blackoutStart)).getTime() - ctx.today.getTime()) / 86_400_000);

@@ -127,6 +127,11 @@ export class AiAssistService {
     this.model = model;
   }
 
+  /** Swap the model transport (e.g. from sample responses to live Claude). */
+  setModel(call: ModelCall | undefined): void {
+    this.call = call;
+  }
+
   get enabled(): boolean {
     return !!this.call;
   }

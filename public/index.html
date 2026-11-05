@@ -25,7 +25,14 @@
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
   .grid2 { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 16px; align-items: start; }
   .grid2 > * { min-width: 0; } .panel { overflow-wrap: break-word; } td:last-child { overflow-wrap: anywhere; }
-  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) {
+    .grid2 { grid-template-columns: 1fr; }
+    header { position: static; gap: 8px; }
+    header h1 { flex: 1; }
+    header > div { order: 2; min-width: 0 !important; flex: 1 1 160px; }
+    nav { order: 3; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    nav button { white-space: nowrap; }
+  }
   h2 { font-size: 15px; margin: 0 0 10px; } h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .item { padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
   .item:hover, .item.sel { border-color: var(--accent); }
@@ -89,6 +96,7 @@ function renderTabs() { $('#tabs').innerHTML = Object.entries(TABS).map(([k, v])
 $('#tabs').onclick = (e) => { const k = e.target.dataset.tab; if (k) { state.tab = k; renderTabs(); render(); } };
 $('#userSel').onchange = (e) => { state.user = e.target.value; state.selTask = null; try { localStorage.setItem('planops.user', state.user); } catch {} render(); };
 
+const money = (n) => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (s) => (s ? s.slice(0, 16).replace('T', ' ') : '');
 const statusChip = (t) => t.exception ? '<span class="chip exception">exception</span>' : `<span class="chip ${t.status}">${t.status}</span>`;
 
@@ -118,8 +126,8 @@ async function renderTaskDetail(el, taskId) {
     work = `<h3>Will ${esc(p.operation)} on ${esc(p.target)}</h3><pre>${esc(JSON.stringify(p.payload, null, 2))}</pre>`;
   } else if (p?.kind === 'calculation') {
     const r = p.result;
-    work = `<h3>Calculation</h3><table><tr><td>Deconversion fee</td><td>$${r.baseFeeUsd}</td></tr><tr><td>Participant fee (${r.participants})</td><td>$${r.participantFeeUsd}</td></tr>
-      <tr><td>Prorated asset fee ($${r.planAssetsUsd.toLocaleString()})</td><td>$${r.assetFeeUsd}</td></tr><tr><th>Total</th><th>$${r.totalUsd}</th></tr></table><p class="small muted">${esc(r.basis)}</p>`;
+    work = `<h3>Calculation</h3><table><tr><td>Deconversion fee</td><td>${money(r.baseFeeUsd)}</td></tr><tr><td>Participant fee (${r.participants.toLocaleString()} participants)</td><td>${money(r.participantFeeUsd)}</td></tr>
+      <tr><td>Prorated asset fee (on ${money(r.planAssetsUsd)} in assets)</td><td>${money(r.assetFeeUsd)}</td></tr><tr><th>Total</th><th>${money(r.totalUsd)}</th></tr></table><p class="small muted">${esc(r.basis)}</p>`;
   } else if (p?.kind === 'check') {
     work = `<h3>Validation</h3>${p.issues.length ? p.issues.map((i) => `<div class="alert bad">${esc(i)}</div>`).join('') : '<p>All checks pass.</p>'}`;
   }
