@@ -30,6 +30,12 @@ Through your identity provider with OpenID Connect (Okta, Entra ID, Google
 Workspace, Ping, Auth0). Plan Ops Hub never handles passwords, and people must
 also be active users in its directory. See [Sign-in](sign-in.md).
 
+**Can our internal audit or compliance reviewers look without changing anything?**
+Yes. Give them the `role:auditor` group. Auditors see every case, its audit
+trail, emails and integration calls, and can filter and download the full audit
+log as CSV. They can't change anything and are never assigned work. See
+[Sign-in](sign-in.md#roles).
+
 ## Troubleshooting
 
 **"You don't have access yet" after signing in.**

@@ -24,6 +24,7 @@ to sign in as. Try:
 
 - **Priya Shah**: an admin, so she can import users, deactivate users and cancel cases.
 - **Marcus Lee**: not an admin, so those controls are hidden and the API refuses them.
+- **Olivia Grant**: an auditor, who can see everything, including the audit log, but change nothing.
 - **Someone not yet provisioned**: signs in at the provider but is refused by Plan Ops Hub, because they aren't in the user directory.
 
 The mock provider signs real tokens and checks PKCE, so this exercises the same
@@ -69,16 +70,21 @@ provider through [SCIM import](users-and-routing.md):
 
 ## Roles
 
-Administrative actions need the **admin** role. Grant it with an identity
-provider group named `role:admin`, imported through SCIM like skill groups, or
-`"roles": ["admin"]` in a direct import.
+Roles are identity-provider groups named `role:<name>`, imported through SCIM
+like skill groups, or `"roles": [...]` in a direct import. Without a role, a
+person works the tasks their skills qualify them for.
 
-| Needs admin | Anyone signed in |
-|---|---|
-| Import users (SCIM or JSON), activate or deactivate users | Work their own tasks and hand them back to routing |
-| Cancel a case | Start requests, view cases, rules, integrations and agents |
-| Test an integration's connection | Ask Claude, approve agent proposals on their tasks |
-| Reassign someone else's task | |
+| Role | Group | Can |
+|---|---|---|
+| **Admin** | `role:admin` | Everything a specialist can, plus: import users, activate or deactivate users, cancel cases, test integration connections, reassign other people's tasks |
+| **Auditor** | `role:auditor` | **Read-only.** See every case and its audit trail, plans, rules, integrations and their call log, agents, emails, insights, and the full **Audit log** with filters and CSV download. Run a rule set's tests. Can't start, work, approve, reassign or cancel anything, and is **never routed work**, even with skills. |
+| *(none)* | | Start requests, work their own tasks and hand them back to routing, ask Claude, approve agent proposals on their tasks, view everything |
+
+**Read-only wins.** Someone with both `role:auditor` and `role:admin` is
+read-only, so adding a group can't quietly give an audit account write access.
+
+To try it, sign in as **Olivia Grant** in `npm run demo:sso`, or pick her in
+**Working as** in development mode.
 
 What work a person gets is still decided by their skills and levels, as before.
 The server enforces every rule; the UI hides controls a person can't use. The

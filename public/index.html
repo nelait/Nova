@@ -56,6 +56,7 @@
     .side-foot { flex-direction: row; flex-wrap: wrap; align-items: end; border-top: 0; padding-top: 0; }
     .side-foot > div { flex: 1 1 180px; min-width: 0; }
     .pagehead { padding: 16px 16px 4px; }
+    .content .readonly-note { margin: 10px 16px 0; }
     main { padding: 10px 16px 32px; }
   }
 
@@ -83,10 +84,11 @@
   .alert { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); border-left: 4px solid var(--warn); padding: 8px 12px; background: color-mix(in srgb, var(--warn) 7%, var(--surface)); margin: 6px 0; border-radius: var(--radius-sm); }
   .alert.bad, .alert.high { border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--surface)); }
   .alert.low { border-color: var(--line); border-left-color: var(--muted); background: var(--surface-2); }
-  button.btn { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 8px 14px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; transition: filter .12s; }
+  button.btn, a.btn { display: inline-block; text-decoration: none; text-align: center; }
+  button.btn, a.btn { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 8px 14px; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; transition: filter .12s; }
   button.btn:hover { filter: brightness(1.08); }
   button.btn:disabled { opacity: .6; cursor: progress; }
-  button.btn.secondary { background: var(--surface); color: var(--ink); border-color: var(--line); }
+  button.btn.secondary, a.btn.secondary { background: var(--surface); color: var(--ink); border-color: var(--line); }
   button.btn.secondary:hover { background: var(--surface-2); filter: none; }
   button.btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
   input, select, textarea { font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 10px; width: 100%; }
@@ -114,11 +116,16 @@
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
   .kpi b { font: 600 30px/1.1 var(--font-display); display: block; font-variant-numeric: tabular-nums; }
+  body.read-only .writes,
   body:not(.is-admin) .admin-only, body:not(.dev-mode) .dev-only, body.sso .dev-only { display: none !important; }
   .who { display: flex; align-items: center; gap: 10px; }
   .who .avatar { flex: 0 0 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px; }
   .who div { min-width: 0; } .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .who span { font-size: 12px; color: var(--muted); }
   .who button { margin-left: auto; flex: 0 0 auto; }
+  .who .badge-ro, .badge-ro { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--brass); border: 1px solid currentColor; border-radius: 999px; padding: 0 7px; margin-top: 2px; white-space: nowrap; }
+  .readonly-note { margin: 10px 28px 0; border: 1px solid var(--line); border-left: 4px solid var(--brass); background: var(--surface); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 14px; font-size: 14px; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end; margin-bottom: 12px; }
+  .filters label { font-size: 12px; color: var(--muted); }
   .devnote { font-size: 12px; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius-sm); padding: 6px 8px; }
 </style>
 </head>
@@ -141,6 +148,7 @@
   </div></aside>
   <div class="content">
     <header class="pagehead"><h1 id="pageTitle">My work</h1><p id="pageSub"></p></header>
+    <div class="readonly-note" id="readOnlyNote" hidden><b>Read-only access.</b> You can see every case, audit trail, rule, integration call and email, but you can't change anything. Auditors are never assigned work.</div>
     <main id="view"></main>
   </div>
 </div>
@@ -164,11 +172,11 @@ async function api(path, opts = {}) {
 function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; t.style.background = bad ? 'var(--bad)' : ''; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), bad ? 7000 : 3000); }
 async function guarded(fn) { try { await fn(); } catch (e) { toast(e.message, true); } }
 
-const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', rules: 'Rules', integrations: 'Integrations', agents: 'Agents', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
+const TABS = { audit: 'Audit log', inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', rules: 'Rules', integrations: 'Integrations', agents: 'Agents', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
 const NAV = [
   ['Work', ['inbox', 'intake', 'cases']],
   ['Process building blocks', ['rules', 'integrations', 'agents']],
-  ['Organization', ['team', 'insights']],
+  ['Organization', ['team', 'insights', 'audit']],
   ['Connected systems', ['trac', 'outbox']],
 ];
 const SUBTITLES = {
@@ -182,13 +190,21 @@ const SUBTITLES = {
   trac: 'The recordkeeper, read through its integration',
   outbox: 'Emails sent to plan sponsors',
   insights: 'How each step performs, and what to improve',
+  audit: 'Every action by people, the router and automation, newest first',
 };
+/** Auditors have no work queue and can't start requests. */
+const HIDDEN_WHEN_READ_ONLY = ['inbox', 'intake'];
 function renderTabs() {
   const myCount = state.myCount ?? 0;
-  $('#tabs').innerHTML = NAV.map(([group, keys]) => `<div class="navgroup"><span>${group}</span>${keys.map((k) =>
+  const moved = state.readOnly && HIDDEN_WHEN_READ_ONLY.includes(state.tab);
+  if (moved) state.tab = 'cases';
+  const visible = (k) => !(state.readOnly && HIDDEN_WHEN_READ_ONLY.includes(k));
+  $('#tabs').innerHTML = NAV.map(([group, keys]) => [group, keys.filter(visible)]).filter(([, keys]) => keys.length).map(([group, keys]) => `<div class="navgroup"><span>${group}</span>${keys.map((k) =>
     `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}" ${state.tab === k ? 'aria-current="page"' : ''}>${TABS[k]}${k === 'inbox' && myCount ? `<span class="count">${myCount}</span>` : ''}</button>`).join('')}</div>`).join('');
   $('#pageTitle').textContent = TABS[state.tab];
   $('#pageSub').textContent = SUBTITLES[state.tab] || '';
+  $('#readOnlyNote').hidden = !state.readOnly;
+  return moved;
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('button[data-tab]'); if (b) { state.tab = b.dataset.tab; renderTabs(); render(); } };
 
@@ -439,6 +455,33 @@ async function renderTrac(v) {
       <td class="small">${p.funds.map((f) => esc(f.ticker) + (f.qdia ? '*' : '')).join(', ')}</td><td class="small">${esc(p.contacts.find((c) => c.role === 'PLAN_ADMINISTRATOR')?.email)}</td><td class="small">${fmtDate(p.updatedAt)}</td></tr>`).join('')}</table></div></div>`;
   $('#outage').onclick = () => guarded(async () => { await api('/trac/simulate-outage', { method: 'POST', body: {} }); toast('The next 10 TRAC requests will fail with 503'); });
 }
+// ---------------------------------------------------------------- audit log
+async function renderAudit(v) {
+  const f = (state.auditFilter ??= { actor: '', event: '', entityId: '', from: '', to: '' });
+  const qs = () => new URLSearchParams(Object.entries({ ...f, to: f.to ? nextDay(f.to) : '' }).filter(([, x]) => x)).toString();
+  const nextDay = (d) => new Date(Date.parse(d) + 86_400_000).toISOString().slice(0, 10);
+  const [rows, users] = await Promise.all([api('/audit?limit=500&' + qs()), api('/users')]);
+  const names = Object.fromEntries(users.map((u) => [u.id, u.name]));
+  v.innerHTML = `<div class="panel"><h2>Audit log</h2>
+    <p class="small muted">Who did what and when: intake, assignments, completions, overrides, agent proposals, emails, sign-ins and user changes. The log is append-only; nobody can edit or delete entries through Plan Ops Hub.</p>
+    <form class="filters" id="auditForm">
+      <div><label for="fActor">Who</label><select id="fActor"><option value="">Anyone</option>${['router', 'system', 'auth', ...users.map((u) => u.id)].map((id) => `<option value="${esc(id)}" ${f.actor === id ? 'selected' : ''}>${esc(names[id] ?? id)}</option>`).join('')}</select></div>
+      <div><label for="fEvent">Event starts with</label><input id="fEvent" placeholder="task.override" value="${esc(f.event)}"></div>
+      <div><label for="fEntity">Case, task or user id</label><input id="fEntity" value="${esc(f.entityId)}"></div>
+      <div><label for="fFrom">From</label><input id="fFrom" type="date" value="${esc(f.from)}"></div>
+      <div><label for="fTo">To (inclusive)</label><input id="fTo" type="date" value="${esc(f.to)}"></div>
+      <div class="row" style="gap:8px"><button class="btn" type="submit">Filter</button><a class="btn secondary" id="auditCsv" href="/api/audit?limit=10000&format=csv&${esc(qs())}" download>Download CSV</a></div>
+    </form>
+    <p class="small muted">${rows.length === 500 ? 'Showing the newest 500 matching entries. Narrow the filters, or download the CSV for up to 10,000.' : `${rows.length} matching entr${rows.length === 1 ? 'y' : 'ies'}.`}</p>
+    <div class="scroll"><table><tr><th>When (UTC)</th><th>Who</th><th>Event</th><th>On</th><th>Detail</th></tr>
+    ${rows.map((a) => `<tr><td class="small" style="white-space:nowrap">${fmtDate(a.at)}</td><td class="small">${esc(names[a.actor] ?? a.actor)}</td><td class="small"><code>${esc(a.event)}</code></td><td class="small">${esc(a.entity)} <span class="muted">${esc(a.entityId)}</span></td><td class="small muted">${esc(a.detail ? JSON.stringify(a.detail).slice(0, 160) : '')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Nothing matches.</td></tr>'}</table></div></div>`;
+  $('#auditForm').onsubmit = (e) => {
+    e.preventDefault();
+    Object.assign(f, { actor: $('#fActor').value, event: $('#fEvent').value.trim(), entityId: $('#fEntity').value.trim(), from: $('#fFrom').value, to: $('#fTo').value });
+    render();
+  };
+}
+
 async function renderOutbox(v) {
   const mails = await api('/outbox');
   v.innerHTML = `<div class="panel"><h2>Outbox (${mails.length})</h2>${mails.map((m) => `<div class="item" style="cursor:default"><b>${esc(m.subject)}</b>
@@ -536,7 +579,7 @@ async function renderAgents(v) {
     </div>`).join('')}</div>`;
 }
 
-const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, rules: renderRules, integrations: renderIntegrations, agents: renderAgents, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
+const VIEWS = { audit: renderAudit, inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, rules: renderRules, integrations: renderIntegrations, agents: renderAgents, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
 async function render() { const v = $('#view'); await guarded(() => VIEWS[state.tab](v)); loadUsers().catch(() => {}); }
 
 async function loadUsers() {
@@ -548,10 +591,13 @@ async function loadUsers() {
   }
   const me = users.find((u) => u.id === state.user);
   state.myCount = me?.openTasks ?? 0;
-  // The server enforces the admin role; the UI only hides controls you can't use.
-  state.isAdmin = !!me?.roles?.includes('admin');
+  // The server enforces roles; the UI only hides controls you can't use.
+  // Read-only (auditor) wins over admin, as on the server.
+  state.readOnly = !!me?.roles?.includes('auditor');
+  state.isAdmin = !!me?.roles?.includes('admin') && !state.readOnly;
   document.body.classList.toggle('is-admin', state.isAdmin);
-  renderTabs();
+  document.body.classList.toggle('read-only', state.readOnly);
+  if (renderTabs()) render(); // an auditor can't stay on My work or New request
 }
 
 /** Signed-in user card with a sign-out button (single sign-on only). */
@@ -559,7 +605,7 @@ function renderWho(user) {
   const initials = user.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   const who = $('#who');
   who.hidden = false;
-  who.innerHTML = `<span class="avatar" aria-hidden="true">${esc(initials)}</span><div><b>${esc(user.name)}</b><span>${esc(user.email)}</span></div><button class="btn secondary" id="signOut">Sign out</button>`;
+  who.innerHTML = `<span class="avatar" aria-hidden="true">${esc(initials)}</span><div title="${esc(user.email)}"><b>${esc(user.name)}</b>${user.readOnly ? '<span class="badge-ro" title="Read-only access">Auditor</span>' : `<span>${esc(user.email)}</span>`}</div><button class="btn secondary" id="signOut">Sign out</button>`;
   $('#signOut').onclick = () => guarded(async () => { await fetch('/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); location.href = '/auth/signed-out'; });
 }
 
@@ -572,7 +618,7 @@ async function boot() {
   await Promise.all([loadUsers(), api('/ai/status').then((s) => (state.ai = s)).catch(() => {})]);
   renderTabs(); render();
 }
-setInterval(() => { if (state.mode && state.tab !== 'intake' && state.tab !== 'team' && !document.activeElement?.matches('input,textarea')) loadUsers().catch(() => {}); }, 5000);
+setInterval(() => { if (state.mode && !['intake', 'team', 'audit'].includes(state.tab) && !document.activeElement?.matches('input,textarea')) loadUsers().catch(() => {}); }, 5000);
 boot().catch((e) => toast(e.message, true));
 </script>
 </body>

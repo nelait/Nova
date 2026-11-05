@@ -9,6 +9,7 @@ import { startServer } from '../src/api/server.ts';
 import { MockIdp } from '../src/auth/mockIdp.ts';
 import { OidcClient, oidcConfigFromEnv } from '../src/auth/oidc.ts';
 import { safeReturnTo } from '../src/auth/auth.ts';
+import { sampleDetails } from './helpers.ts';
 
 const ISSUER = 'https://idp.example.test';
 const PUBLIC = join(import.meta.dirname, '..', 'public');
@@ -22,6 +23,7 @@ const idp = new MockIdp({
     { email: 'marcus@planops.example', name: 'Marcus Lee' },
     { email: 'stranger@elsewhere.example', name: 'Not Provisioned' },
     { email: 'sam@planops.example', name: 'Sam Okafor', emailVerified: false },
+    { email: 'olivia@planops.example', name: 'Olivia Grant' },
   ],
 });
 
@@ -203,4 +205,66 @@ test('development mode: localhost only, no sign-in routes, admin still enforced'
   } finally {
     s.close();
   }
+});
+
+test('auditors can read everything but change nothing', async () => {
+  const { cookie } = await signIn('olivia@planops.example');
+  const me = await (await get('/api/me', cookie)).json();
+  assert.deepEqual([me.user.roles, me.user.readOnly, me.user.admin], [['auditor'], true, false]);
+  for (const path of ['/api/cases', '/api/plans', '/api/audit', '/api/users', '/api/integrations/calls', '/api/outbox', '/api/insights', '/api/rules']) {
+    assert.equal((await get(path, cookie)).status, 200, path);
+  }
+  // Rule tests and evaluation compute an answer without changing anything.
+  assert.equal((await post('/api/rules/fee-change/test', cookie, {})).status, 200);
+  const before = app.repos.cases.all().length;
+  const intake = await post('/api/intake', cookie, { caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } });
+  assert.equal(intake.status, 403);
+  assert.equal((await intake.json()).error, 'Auditors have read-only access');
+  assert.equal(app.repos.cases.all().length, before);
+  assert.equal((await post('/api/tasks/any/complete', cookie, {})).status, 403);
+  // Signing out is still allowed.
+  assert.equal((await post('/auth/logout', cookie, {})).status, 200);
+});
+
+test('read-only wins: an auditor who is also an admin is still read-only', async () => {
+  const dev = createApp({ dbPath: ':memory:', seedUsers: true, env: {}, aiModel: null, agentModel: null });
+  dev.users.import([{ id: 'u_both', name: 'Both Roles', email: 'both@planops.example', roles: ['auditor', 'admin'] }], 'test');
+  const { server: s, base: b } = await listen(dev);
+  try {
+    const res = await fetch(b + '/api/users/u_sam/active', { method: 'POST', headers: { 'x-user-id': 'u_both', 'content-type': 'application/json' }, body: '{"active":false}' });
+    assert.equal(res.status, 403);
+    assert.equal(dev.users.get('u_sam')!.active, true);
+  } finally {
+    s.close();
+  }
+});
+
+test('auditors are never routed work, even with matching skills', async () => {
+  const dev = createApp({ dbPath: ':memory:', seedUsers: true, env: {}, aiModel: null, agentModel: null });
+  // Everyone else who could do compliance work is away; an auditor holds the skill.
+  for (const id of ['u_elena', 'u_rafael']) dev.users.setActive(id, false);
+  dev.users.import([{ id: 'u_aud', name: 'Ann Auditor', email: 'ann@planops.example', roles: ['auditor'], skills: [{ skill: 'COMPLIANCE', level: 3 }] }], 'test');
+  await dev.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } }, 'portal');
+  const compliance = dev.repos.tasks.all().filter((t) => t.skill === 'COMPLIANCE');
+  assert.ok(compliance.length > 0);
+  assert.ok(compliance.every((t) => t.assigneeId !== 'u_aud'));
+  const waiting = compliance.find((t) => t.status === 'READY')!;
+  assert.throws(() => dev.cases.reassign(waiting.id, 'u_priya', 'u_aud'), /auditor/);
+});
+
+test('the audit log filters and downloads as CSV that is safe to open in a spreadsheet', async () => {
+  const { cookie } = await signIn('olivia@planops.example');
+  app.cases.audit('u_priya', 'user', 'u_x', 'test.formula', { note: '=HYPERLINK("http://evil")' });
+  const rows = await (await get('/api/audit?event=user.signed-in&actor=u_olivia', cookie)).json();
+  assert.ok(rows.length > 0 && rows.every((r: { event: string; actor: string }) => r.event === 'user.signed-in' && r.actor === 'u_olivia'));
+  const csv = await get('/api/audit?format=csv&event=test.formula', cookie);
+  assert.match(csv.headers.get('content-type')!, /text\/csv/);
+  assert.match(csv.headers.get('content-disposition')!, /attachment/);
+  const lines = (await csv.text()).trim().split('\r\n');
+  assert.equal(lines[0], 'at,actor,event,entity,entityId,caseId,detail');
+  assert.equal(lines.length, 2);
+  assert.ok(lines[1].includes('"test.formula"'));
+  assert.ok(!/,"=/.test(lines[1]), 'no cell starts with =');
+  const future = await (await get('/api/audit?from=2999-01-01', cookie)).json();
+  assert.deepEqual(future, []);
 });

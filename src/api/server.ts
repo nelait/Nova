@@ -10,16 +10,21 @@ import { FUNCTIONS, RuleError } from '../rules/expression.ts';
 import { IntegrationError } from '../integrations/client.ts';
 import { AgentError } from '../ai/agents.ts';
 import { AuthError } from '../auth/oidc.ts';
-import type { User } from '../domain/types.ts';
+import type { AuditEvent, User } from '../domain/types.ts';
+import { isAdmin as hasAdmin, isAuditor } from '../users/roles.ts';
 
 type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string; me?: User; isAdmin: boolean }) => unknown;
 
-/** Routes marked `admin` need the admin role (identity-provider group role:admin). */
-const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler; admin: boolean }[] = [];
-function route(method: string, path: string, handler: Handler, opts: { admin?: boolean } = {}) {
+/**
+ * Routes marked `admin` need the admin role (identity-provider group role:admin).
+ * Auditors (role:auditor) may only use GET routes and POST routes marked
+ * `readOnly`, which compute an answer without changing anything.
+ */
+const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler; admin: boolean; readOnly: boolean }[] = [];
+function route(method: string, path: string, handler: Handler, opts: { admin?: boolean; readOnly?: boolean } = {}) {
   const keys: string[] = [];
   const pattern = new RegExp('^' + path.replace(/:(\w+)/g, (_m, k: string) => (keys.push(k), '([^/]+)')) + '$');
-  routes.push({ method, pattern, keys, handler, admin: !!opts.admin });
+  routes.push({ method, pattern, keys, handler, admin: !!opts.admin, readOnly: method === 'GET' || !!opts.readOnly });
 }
 
 class ForbiddenError extends Error {}
@@ -27,7 +32,7 @@ class ForbiddenError extends Error {}
 // --- who am I
 route('GET', '/api/me', ({ app, me }) => ({
   mode: app.auth.mode,
-  user: me ? { id: me.id, name: me.name, email: me.email, roles: me.roles ?? [], skills: me.skills } : null,
+  user: me ? { id: me.id, name: me.name, email: me.email, roles: me.roles ?? [], skills: me.skills, readOnly: isAuditor(me), admin: hasAdmin(me) } : null,
 }));
 
 // --- reference data
@@ -98,12 +103,12 @@ route('GET', '/api/rules', ({ app }) =>
 );
 route('GET', '/api/rules/functions', () => Object.entries(FUNCTIONS).map(([name, f]) => ({ name, doc: f.doc })));
 route('GET', '/api/rules/:id', ({ app, params }) => app.kb.rules.get(params.id));
-route('POST', '/api/rules/:id/test', ({ app, params }) => app.kb.rules.test(params.id));
+route('POST', '/api/rules/:id/test', ({ app, params }) => app.kb.rules.test(params.id), { readOnly: true });
 route('POST', '/api/rules/:id/evaluate', ({ app, params, body }) => {
   // Evaluate against a live case (read-only) or a context supplied by the caller.
   const context = body.caseId ? app.cases.ruleContextForCase(String(body.caseId)) : (body.context ?? {});
   return { context, result: app.kb.rules.evaluate(params.id, context) };
-});
+}, { readOnly: true });
 
 route('GET', '/api/ai/status', ({ app }) => ({ enabled: app.ai.enabled, model: app.ai.model }));
 route('GET', '/api/tasks/:id/ai-assist', ({ app, params, actor }) => app.ai.cached(params.id, actor));
@@ -161,7 +166,36 @@ route('POST', '/api/integrations/:id/test', ({ app, params }) => app.integration
 route('GET', '/api/integrations/calls', ({ app, query }) => app.integrations.calls(Number(query.get('limit') ?? 50)));
 route('GET', '/api/outbox', ({ app }) => app.email.list());
 route('GET', '/api/insights', ({ app }) => app.insights());
-route('GET', '/api/audit', ({ app, query }) => app.repos.audit.all().reverse().slice(0, Number(query.get('limit') ?? 200)));
+// Audit log, newest first, with optional filters. format=csv downloads it for review elsewhere.
+route('GET', '/api/audit', ({ app, query }) => {
+  const q = (k: string) => query.get(k)?.trim() || undefined;
+  const [actor, event, entity, from, to] = [q('actor'), q('event'), q('entityId'), q('from'), q('to')];
+  const rows = app.repos.audit
+    .all()
+    .reverse()
+    .filter((e) => (!actor || e.actor === actor) && (!event || e.event.startsWith(event)) && (!entity || e.entityId === entity) && (!from || e.at >= from) && (!to || e.at < to));
+  const limit = Math.min(Number(q('limit') ?? 200), 10_000);
+  if (q('format') === 'csv') return new CsvBody(auditCsv(rows.slice(0, limit)));
+  return rows.slice(0, limit);
+});
+
+/** A handler result sent as a CSV download instead of JSON. */
+class CsvBody {
+  text: string;
+  constructor(text: string) {
+    this.text = text;
+  }
+}
+function auditCsv(rows: AuditEvent[]): string {
+  // Quote every cell; a leading = + - @ is prefixed with ' so spreadsheets don't run it as a formula.
+  const cell = (v: unknown) => {
+    let s = v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v);
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const cols = ['at', 'actor', 'event', 'entity', 'entityId', 'caseId', 'detail'] as const;
+  return [cols.join(','), ...rows.map((r) => cols.map((c) => cell((r as unknown as Record<string, unknown>)[c])).join(','))].join('\r\n') + '\r\n';
+}
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 
@@ -275,11 +309,17 @@ export function startServer(app: App, port: number, publicDir: string, opts: { h
         for (const r of routes) {
           const m = req.method === r.method && url.pathname.match(r.pattern);
           if (!m) continue;
-          const isAdmin = !!me?.roles?.includes('admin');
+          const isAdmin = hasAdmin(me);
+          if (!r.readOnly && isAuditor(me)) throw new ForbiddenError('Auditors have read-only access');
           if (r.admin && !isAdmin) throw new ForbiddenError('This action needs the admin role');
           const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
           const body = req.method === 'GET' ? {} : await readBody(req);
-          return send(res, 200, await r.handler({ app, params, body, query: url.searchParams, actor, me, isAdmin }));
+          const result = await r.handler({ app, params, body, query: url.searchParams, actor, me, isAdmin });
+          if (result instanceof CsvBody) {
+            res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="plan-ops-audit.csv"', 'cache-control': 'no-store' });
+            return void res.end(result.text);
+          }
+          return send(res, 200, result);
         }
         return send(res, 404, { error: 'No such route' });
       }

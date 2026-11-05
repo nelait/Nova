@@ -40,12 +40,13 @@ pasted payload. For local testing, `config/users.json` seeds a sample team.
 
 The group `role:admin` grants the admin role (importing and deactivating users,
 cancelling cases, reassigning other people's tasks). Importing users needs the
-admin role. People sign in with the same email their user record has; see
+admin role. The group `role:auditor` gives read-only access; auditors are skipped
+by routing and can't be given tasks, even if they hold skills. People sign in with the same email their user record has; see
 [Sign-in](sign-in.md). Deactivated users are signed out at once.
 
 ## How work is routed
 
-1. **Eligible:** active, holds the step's skill at or above its minimum level, and below capacity.
+1. **Eligible:** active, not an auditor, holds the step's skill at or above its minimum level, and below capacity.
 2. **Least loaded:** the lowest ratio of open tasks to capacity.
 3. **Ties rotate:** among equally loaded people, whoever was assigned work least recently goes next. Seniority does not win ties, so work is shared evenly.
 4. **Deterministic:** the final tie-break is the user id.

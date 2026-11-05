@@ -32,6 +32,7 @@ person sees only the work routed to them:
 | Rafael Torres | Compliance L2 | Contact-change call-backs, disclosures |
 | Sam Okafor | Investments L3 | An AI-proposed fund mapping, a closed fund |
 | Dana Kim | Terminations L3 | Termination fees, a blackout notice |
+| Olivia Grant | None (auditor) | Nothing: read-only access to every case and the **Audit log** |
 
 ## 3. Work a task
 

@@ -7,7 +7,8 @@ from this site's own origin.
 sign-in identifies the user; without one the API returns 401
 `{ "error": "Sign in required", "signIn": "/auth/login" }`. In development mode
 (localhost only) the acting user is the `x-user-id` header. Routes marked
-**admin** need the admin role.
+**admin** need the admin role. Auditors (read-only) can use every `GET` route and
+the rule `test` and `evaluate` routes; anything else returns 403.
 
 Errors return `{ "error": "...", "issues": [...] }` with status 401 (not signed
 in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
@@ -84,6 +85,6 @@ POST /api/intake
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/insights` | Step metrics and suggestions |
-| GET | `/api/audit?limit=200` | Most recent audit events |
+| GET | `/api/audit` | Audit events, newest first. Filters: `actor`, `event` (prefix, e.g. `task.`), `entityId`, `from`, `to` (ISO dates; `to` exclusive), `limit` (default 200, max 10,000). `format=csv` downloads a CSV. |
 | GET | `/api/outbox` | Sent emails |
 | GET | `/api/trac/plans` | Recordkeeper plans, read through the integration |

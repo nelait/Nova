@@ -65,6 +65,7 @@ to sign in as. Try:</p>
 <ul>
 <li><strong>Priya Shah</strong>: an admin, so she can import users, deactivate users and cancel cases.</li>
 <li><strong>Marcus Lee</strong>: not an admin, so those controls are hidden and the API refuses them.</li>
+<li><strong>Olivia Grant</strong>: an auditor, who can see everything, including the audit log, but change nothing.</li>
 <li><strong>Someone not yet provisioned</strong>: signs in at the provider but is refused by Plan Ops Hub, because they aren&#39;t in the user directory.</li>
 </ul>
 <p>The mock provider signs real tokens and checks PKCE, so this exercises the same
@@ -145,33 +146,37 @@ provider through <a href="users-and-routing.html">SCIM import</a>:</p>
 <li>Sign-ins and sign-outs are audited as <code>user.signed-in</code> and <code>user.signed-out</code>.</li>
 </ul>
 <h2 id="roles">Roles</h2>
-<p>Administrative actions need the <strong>admin</strong> role. Grant it with an identity
-provider group named <code>role:admin</code>, imported through SCIM like skill groups, or
-<code>&quot;roles&quot;: [&quot;admin&quot;]</code> in a direct import.</p>
+<p>Roles are identity-provider groups named <code>role:&lt;name&gt;</code>, imported through SCIM
+like skill groups, or <code>&quot;roles&quot;: [...]</code> in a direct import. Without a role, a
+person works the tasks their skills qualify them for.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
-<th>Needs admin</th>
-<th>Anyone signed in</th>
+<th>Role</th>
+<th>Group</th>
+<th>Can</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>Import users (SCIM or JSON), activate or deactivate users</td>
-<td>Work their own tasks and hand them back to routing</td>
+<td><strong>Admin</strong></td>
+<td><code>role:admin</code></td>
+<td>Everything a specialist can, plus: import users, activate or deactivate users, cancel cases, test integration connections, reassign other people&#39;s tasks</td>
 </tr>
 <tr>
-<td>Cancel a case</td>
-<td>Start requests, view cases, rules, integrations and agents</td>
+<td><strong>Auditor</strong></td>
+<td><code>role:auditor</code></td>
+<td><strong>Read-only.</strong> See every case and its audit trail, plans, rules, integrations and their call log, agents, emails, insights, and the full <strong>Audit log</strong> with filters and CSV download. Run a rule set&#39;s tests. Can&#39;t start, work, approve, reassign or cancel anything, and is <strong>never routed work</strong>, even with skills.</td>
 </tr>
 <tr>
-<td>Test an integration&#39;s connection</td>
-<td>Ask Claude, approve agent proposals on their tasks</td>
-</tr>
-<tr>
-<td>Reassign someone else&#39;s task</td>
+<td><em>(none)</em></td>
 <td></td>
+<td>Start requests, work their own tasks and hand them back to routing, ask Claude, approve agent proposals on their tasks, view everything</td>
 </tr>
 </tbody></table></div>
+<p><strong>Read-only wins.</strong> Someone with both <code>role:auditor</code> and <code>role:admin</code> is
+read-only, so adding a group can&#39;t quietly give an audit account write access.</p>
+<p>To try it, sign in as <strong>Olivia Grant</strong> in <code>npm run demo:sso</code>, or pick her in
+<strong>Working as</strong> in development mode.</p>
 <p>What work a person gets is still decided by their skills and levels, as before.
 The server enforces every rule; the UI hides controls a person can&#39;t use. The
 demo-only <em>Simulate TRAC outage</em> button doesn&#39;t exist with single sign-on.</p>

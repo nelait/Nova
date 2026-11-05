@@ -1,3 +1,4 @@
+import { isAuditor } from '../users/roles.ts';
 import type { AuditEvent, Case, Plan, PlanDetails, Task, User } from '../domain/types.ts';
 import { addHours, newId, type Clock } from '../domain/util.ts';
 import { Collection, ValidationError } from '../store/db.ts';
@@ -424,6 +425,7 @@ export class CaseService {
     if (target) {
       const u = this.users.get(target);
       if (!u?.active) throw new ValidationError(`User ${target} is not active`);
+      if (isAuditor(u)) throw new ValidationError(`${u.name} is an auditor (read-only) and can't be given tasks`);
       if (!u.skills.some((s) => s.skill === t.skill && s.level >= t.minSkillLevel)) throw new ValidationError(`${u.name} lacks ${t.skill} L${t.minSkillLevel}`);
     } else {
       target = routeTask(t, this.users.list(), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;

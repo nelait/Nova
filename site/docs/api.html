@@ -38,7 +38,8 @@ from this site&#39;s own origin.</p>
 sign-in identifies the user; without one the API returns 401
 <code>{ &quot;error&quot;: &quot;Sign in required&quot;, &quot;signIn&quot;: &quot;/auth/login&quot; }</code>. In development mode
 (localhost only) the acting user is the <code>x-user-id</code> header. Routes marked
-<strong>admin</strong> need the admin role.</p>
+<strong>admin</strong> need the admin role. Auditors (read-only) can use every <code>GET</code> route and
+the rule <code>test</code> and <code>evaluate</code> routes; anything else returns 403.</p>
 <p>Errors return <code>{ &quot;error&quot;: &quot;...&quot;, &quot;issues&quot;: [...] }</code> with status 401 (not signed
 in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
 503 (AI unavailable) or 500.</p>
@@ -262,8 +263,8 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 </tr>
 <tr>
 <td>GET</td>
-<td><code>/api/audit?limit=200</code></td>
-<td>Most recent audit events</td>
+<td><code>/api/audit</code></td>
+<td>Audit events, newest first. Filters: <code>actor</code>, <code>event</code> (prefix, e.g. <code>task.</code>), <code>entityId</code>, <code>from</code>, <code>to</code> (ISO dates; <code>to</code> exclusive), <code>limit</code> (default 200, max 10,000). <code>format=csv</code> downloads a CSV.</td>
 </tr>
 <tr>
 <td>GET</td>
