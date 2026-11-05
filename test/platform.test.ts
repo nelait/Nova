@@ -180,3 +180,30 @@ test('rewritten emails must keep the facts the template put in them', async () =
   const reworded = g.prepared.body.replace('$2500', '$2,500').replace('Dear Jane Doe', 'Hello Jane');
   assert.equal((await app.cases.completeTask(fee.id, fee.assigneeId!, { edits: { body: reworded } })).status, 'DONE');
 });
+
+test('policy: every COMPLIANCE step, in every process and client variant, requires level 2+', () => {
+  const app = testApp();
+  const offenders: string[] = [];
+  for (const client of [{ clientId: 'default' }, ...app.kb.listClients()]) {
+    for (const pb of app.kb.listPlaybooks()) {
+      for (const s of app.kb.playbookFor(pb.caseType, client.clientId).steps) {
+        if (s.skill === 'COMPLIANCE' && (s.minSkillLevel ?? 1) < 2) offenders.push(`${client.clientId}: ${pb.caseType} / ${s.id}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test('termination authorization never routes to a COMPLIANCE trainee', async () => {
+  const app = testApp();
+  const ids: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const { plan } = await installPlan(app, 'default', sampleDetails({ ein: `12-200000${i}` }));
+    const { case: kase } = await app.cases.submitIntake(
+      { caseType: 'TERMINATION', channel: 'DIGITAL', planId: plan.id, data: { reason: 'x', successorProvider: 'y', effectiveDate: '2027-02-15' } },
+      'portal',
+    );
+    ids.push(app.cases.tasksFor(kase.id).find((t) => t.stepId === 'verify-authority')!.assigneeId!);
+  }
+  assert.ok(ids.every((u) => u === 'u_elena' || u === 'u_rafael'), ids.join(', '));
+});

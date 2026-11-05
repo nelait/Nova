@@ -1,6 +1,6 @@
 {
   "id": "termination",
-  "version": 1,
+  "version": 2,
   "caseType": "TERMINATION",
   "name": "Plan termination / deconversion",
   "description": "Sponsor ends the relationship (moving to a successor provider or terminating the plan).",
@@ -18,6 +18,7 @@
       "id": "verify-authority",
       "name": "Verify termination authorization",
       "skill": "COMPLIANCE",
+      "minSkillLevel": 2,
       "mode": "MANUAL",
       "action": { "type": "none" },
       "dependsOn": ["validate-request"],
