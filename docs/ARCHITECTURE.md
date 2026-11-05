@@ -163,9 +163,14 @@ Case: OPEN ─all tasks DONE/SKIPPED─► COMPLETED      (cancel ─► CANCELL
 ## Routing policy
 
 Eligible users are active, hold the task's skill at or above `minSkillLevel`, and
-are below capacity. Among them the router picks the lowest load ratio (open tasks ÷
-capacity), then the higher skill level, then user id. With no eligible user the task
-waits in the unassigned queue, and Insights reports the backlog by skill.
+are below capacity. Skill level decides who **may** take a task (for example,
+sponsor verification, 408(b)(2) disclosures and contact-change call-backs need
+COMPLIANCE level 2+); it does not decide who gets it. Among eligible users the
+router picks the lowest load ratio (open tasks ÷ capacity), then whoever was
+assigned work **least recently** (round-robin, taken from the strictly ordered
+audit log), then user id. Equally loaded people therefore take turns, so work is
+split evenly regardless of seniority. With no eligible user the task waits in the
+unassigned queue, and Insights reports the backlog by skill.
 
 ## Regulatory touchpoints modelled (illustrative, not legal advice)
 

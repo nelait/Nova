@@ -44,6 +44,16 @@ test('router: respects capacity and spreads load', async () => {
   assert.equal(routeTask(task, users, new Map([['a', 1], ['b', 1]])).assigneeId, 'b'); // 1/4 < 1/2
   assert.equal(routeTask(task, users, new Map([['a', 0], ['b', 4]])).assigneeId, 'a');
   assert.equal(routeTask(task, users, new Map([['a', 2], ['b', 4]])).assigneeId, undefined);
+  // Equal load ratio: whoever was assigned least recently goes next, even if less senior.
+  const equal = [
+    { ...users[0], skills: [{ skill: 'X', level: 3 }], capacity: 4 },
+    { ...users[1], skills: [{ skill: 'X', level: 1 }], capacity: 4 },
+  ];
+  const idle = new Map<string, number>();
+  assert.equal(routeTask(task, equal, idle).assigneeId, 'a', 'nobody assigned yet: user id decides');
+  assert.equal(routeTask(task, equal, idle, [], new Map([['a', 7]])).assigneeId, 'b', 'a had the last one');
+  assert.equal(routeTask(task, equal, idle, [], new Map([['a', 7], ['b', 9]])).assigneeId, 'a');
+  assert.match(routeTask(task, equal, idle).reason, /next in rotation of 2/);
 });
 
 test('reassign: target must hold the skill at the required level; auto reassign excludes current owner', async () => {

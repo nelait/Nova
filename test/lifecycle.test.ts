@@ -40,14 +40,27 @@ test('installation: auto steps run, human steps route by skill, plan lands on TR
   assert.ok(!welcome.body.includes('[MISSING'));
 });
 
-test('ties go to the more proficient user; level-gated steps skip trainees', async () => {
+test('ties rotate evenly between eligible users regardless of seniority; level-gated steps skip trainees', async () => {
   const app = testApp();
-  const { case: kase } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'MANUAL', data: { details: sampleDetails() } }, 'u_priya');
-  await workCase(app, kase.id);
-  const t = Object.fromEntries(app.cases.tasksFor(kase.id).map((t) => [t.stepId, t]));
-  assert.equal(t['welcome-email'].assigneeId, 'u_priya'); // L3 beats L1 at equal load
-  assert.equal(t['trac-install'].assigneeId, 'u_priya'); // marcus is L1, step needs L2
-  assert.equal(t['verify-sponsor'].assigneeId, 'u_elena'); // COMPLIANCE L3 over sam's L1
+  const steps: Record<string, string>[] = [];
+  // Four installations worked to completion one after another, so everyone is
+  // idle (equal load) whenever a task is routed: only the tie-break decides.
+  for (let i = 0; i < 4; i++) {
+    const { case: kase } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'MANUAL', data: { details: sampleDetails({ ein: `12-100000${i}` }) } }, 'u_priya');
+    await workCase(app, kase.id);
+    steps.push(Object.fromEntries(app.cases.tasksFor(kase.id).map((t) => [t.stepId, t.assigneeId ?? ''])));
+  }
+  // COMPLIANCE L2+ work (verification, fee disclosure) is split evenly between
+  // Elena (L3) and Rafael (L2); Sam (L1) never gets it.
+  const compliance = steps.flatMap((s) => [s['verify-sponsor'], s['fee-disclosure']]);
+  assert.equal(compliance.filter((u) => u === 'u_elena').length, 4);
+  assert.equal(compliance.filter((u) => u === 'u_rafael').length, 4);
+  assert.ok(!compliance.includes('u_sam'));
+  // PLAN_SETUP work with no minimum level rotates between Priya (L3) and Marcus (L1).
+  const planSetup = steps.flatMap((s) => [s['welcome-email'], s['enrollment-meetings']]);
+  assert.equal(planSetup.filter((u) => u === 'u_priya').length, planSetup.filter((u) => u === 'u_marcus').length);
+  // The TRAC install needs PLAN_SETUP L2: always Priya, never Marcus (L1).
+  assert.ok(steps.every((s) => s['trac-install'] === 'u_priya'));
 });
 
 test('bad onboarding data becomes an exception for a person, who fixes and retries', async () => {

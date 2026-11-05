@@ -303,13 +303,27 @@ export class CaseService {
     return load;
   }
 
+  /**
+   * Order of each user's most recent assignment (higher = more recent), from the
+   * audit log, which is strictly ordered even when timestamps are equal. The
+   * router uses it to rotate work between equally loaded people.
+   */
+  lastAssigned(): Map<string, number> {
+    const last = new Map<string, number>();
+    this.r.audit.all().forEach((e, i) => {
+      const to = (e.detail as { to?: string } | undefined)?.to;
+      if ((e.event === 'task.assigned' || e.event === 'task.reassigned') && to) last.set(to, i);
+    });
+    return last;
+  }
+
   /** Route every ready human task that has no owner (optionally only for one case). */
   routeUnassigned(caseId?: string): number {
     let routed = 0;
     const users = this.users.list();
     const pending = this.r.tasks.find((t) => t.status === 'READY' && !t.assigneeId && this.needsHuman(t) && (!caseId || t.caseId === caseId));
     for (const t of pending) {
-      const decision = routeTask(t, users, this.openLoad());
+      const decision = routeTask(t, users, this.openLoad(), [], this.lastAssigned());
       if (decision.assigneeId) {
         this.save(t, { assigneeId: decision.assigneeId }, 'router', 'assigned', { to: decision.assigneeId, reason: decision.reason });
         routed++;
@@ -412,7 +426,7 @@ export class CaseService {
       if (!u?.active) throw new ValidationError(`User ${target} is not active`);
       if (!u.skills.some((s) => s.skill === t.skill && s.level >= t.minSkillLevel)) throw new ValidationError(`${u.name} lacks ${t.skill} L${t.minSkillLevel}`);
     } else {
-      target = routeTask(t, this.users.list(), this.openLoad(), t.assigneeId ? [t.assigneeId] : []).assigneeId;
+      target = routeTask(t, this.users.list(), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;
     }
     return this.save(t, { assigneeId: target, status: 'READY', startedAt: undefined }, by, 'reassigned', { from: t.assigneeId, to: target ?? null });
   }
