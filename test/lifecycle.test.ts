@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { installPlan, sampleDetails, testApp, workCase } from './helpers.ts';
+import { installPlan, sampleDetails, testApp, workCase, addComplianceTrainee } from './helpers.ts';
 
 test('installation: auto steps run, human steps route by skill, plan lands on TRAC', async () => {
   const app = testApp();
@@ -42,6 +42,7 @@ test('installation: auto steps run, human steps route by skill, plan lands on TR
 
 test('ties rotate evenly between eligible users regardless of seniority; level-gated steps skip trainees', async () => {
   const app = testApp();
+  const trainee = addComplianceTrainee(app);
   const steps: Record<string, string>[] = [];
   // Four installations worked to completion one after another, so everyone is
   // idle (equal load) whenever a task is routed: only the tie-break decides.
@@ -51,11 +52,11 @@ test('ties rotate evenly between eligible users regardless of seniority; level-g
     steps.push(Object.fromEntries(app.cases.tasksFor(kase.id).map((t) => [t.stepId, t.assigneeId ?? ''])));
   }
   // COMPLIANCE L2+ work (verification, fee disclosure) is split evenly between
-  // Elena (L3) and Rafael (L2); Sam (L1) never gets it.
+  // Elena (L3) and Rafael (L2); the COMPLIANCE L1 trainee never gets it.
   const compliance = steps.flatMap((s) => [s['verify-sponsor'], s['fee-disclosure']]);
   assert.equal(compliance.filter((u) => u === 'u_elena').length, 4);
   assert.equal(compliance.filter((u) => u === 'u_rafael').length, 4);
-  assert.ok(!compliance.includes('u_sam'));
+  assert.ok(!compliance.includes(trainee));
   // PLAN_SETUP work with no minimum level rotates between Priya (L3) and Marcus (L1).
   const planSetup = steps.flatMap((s) => [s['welcome-email'], s['enrollment-meetings']]);
   assert.equal(planSetup.filter((u) => u === 'u_priya').length, planSetup.filter((u) => u === 'u_marcus').length);

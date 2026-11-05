@@ -12,6 +12,15 @@ export function testApp(aiModel: ModelCall | null = null, agentModel: AgentModel
   return Object.assign(app, { tick: (h: number) => void (now += h * 3600_000) });
 }
 
+/**
+ * Adds a COMPLIANCE level-1 trainee. The seed team has none, so tests that prove
+ * level-2 work never reaches a trainee add one explicitly.
+ */
+export function addComplianceTrainee(app: App): string {
+  app.users.importScim([{ id: 'trainee', userName: 'tia@planops.example', displayName: 'Tia Trainee', groups: [{ display: 'skill:COMPLIANCE:1' }] }], 'test');
+  return 'u_trainee';
+}
+
 export function sampleDetails(overrides: Partial<PlanDetails> = {}): PlanDetails {
   return {
     sponsorName: 'Acme Robotics Inc.',

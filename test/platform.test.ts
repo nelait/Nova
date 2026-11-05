@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { installPlan, sampleDetails, testApp, workCase } from './helpers.ts';
+import { installPlan, sampleDetails, testApp, workCase, addComplianceTrainee } from './helpers.ts';
 import { routeTask } from '../src/routing/skillRouter.ts';
 import { validatePlaybook } from '../src/knowledge/knowledgeBase.ts';
 import type { Task, User } from '../src/domain/types.ts';
@@ -62,8 +62,9 @@ test('reassign: target must hold the skill at the required level; auto reassign 
   const verify = tasks.find((t) => t.stepId === 'verify-sponsor')!;
   assert.equal(verify.assigneeId, 'u_elena');
   assert.throws(() => app.cases.reassign(verify.id, 'lead', 'u_priya'), /lacks COMPLIANCE/);
-  // Sponsor verification needs COMPLIANCE level 2+: Sam (level 1) can't take it.
-  assert.throws(() => app.cases.reassign(verify.id, 'lead', 'u_sam'), /lacks COMPLIANCE L2/);
+  // Sponsor verification needs COMPLIANCE level 2+: a level-1 trainee can't take it.
+  const trainee = addComplianceTrainee(app);
+  assert.throws(() => app.cases.reassign(verify.id, 'lead', trainee), /lacks COMPLIANCE L2/);
   // Auto reassign moves it away from the current owner, to the other level-2+ user.
   assert.equal(app.cases.reassign(verify.id, 'lead').assigneeId, 'u_rafael');
   // With no other qualified user free, it goes back to the queue rather than to a trainee.
@@ -76,7 +77,8 @@ test('reassign: target must hold the skill at the required level; auto reassign 
 
 test('sponsor verification never routes to a COMPLIANCE trainee, even when others are busy', async () => {
   const app = testApp();
-  // Enough work that load-balancing alone would reach Sam.
+  addComplianceTrainee(app);
+  // Enough work that load-balancing alone would reach the trainee.
   for (let i = 0; i < 4; i++) {
     await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ ein: `12-000000${i}` }) } }, 'portal');
   }
@@ -88,6 +90,7 @@ test('sponsor verification never routes to a COMPLIANCE trainee, even when other
 
 test('contact-change call-back never routes to a COMPLIANCE trainee, even when others are busy', async () => {
   const app = testApp();
+  const trainee = addComplianceTrainee(app);
   const { plan } = await installPlan(app);
   for (const name of ['Omar', 'Lena', 'Kofi']) {
     await app.cases.submitIntake(
@@ -98,7 +101,7 @@ test('contact-change call-back never routes to a COMPLIANCE trainee, even when o
   const callbacks = app.repos.tasks.find((t) => t.stepId === 'verify-authority');
   assert.equal(callbacks.length, 3);
   assert.ok(callbacks.every((t) => (t.assigneeId === 'u_elena' || t.assigneeId === 'u_rafael') && t.minSkillLevel === 2));
-  assert.throws(() => app.cases.reassign(callbacks[0].id, 'lead', 'u_sam'), /lacks COMPLIANCE L2/);
+  assert.throws(() => app.cases.reassign(callbacks[0].id, 'lead', trainee), /lacks COMPLIANCE L2/);
 });
 
 test('TRAC outage: install step goes to exception; retry is idempotent', async () => {
@@ -196,6 +199,7 @@ test('policy: every COMPLIANCE step, in every process and client variant, requir
 
 test('termination authorization never routes to a COMPLIANCE trainee', async () => {
   const app = testApp();
+  addComplianceTrainee(app);
   const ids: string[] = [];
   for (let i = 0; i < 3; i++) {
     const { plan } = await installPlan(app, 'default', sampleDetails({ ein: `12-200000${i}` }));
