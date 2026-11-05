@@ -54,6 +54,7 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
 | 7 | Action executor / integration hub | `src/actions/executor.ts`, `src/integrations/*` |
 | 8 | Audit | `audit` table, written by `CaseService.save` |
 | 9 | Insights / learning loop | `src/learning/insights.ts` |
+| 10 | Claude assistance (optional) | `src/ai/claudeAssist.ts` |
 
 ## Key design decisions
 
@@ -88,6 +89,27 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
    by skill) and produce suggestions, for example "drafts approved unchanged 5/5,
    consider AUTO" or "60% of drafts edited, fix the template". Playbooks are never
    changed automatically.
+
+7. **Claude assists; it doesn't decide.** On request, Claude (`claude-opus-5-5`,
+   structured outputs, effort `medium`, server-side refusal fallback) receives the
+   step's guidance, checklist and regulatory reference, the case data, earlier
+   step results and the prepared work. It returns a briefing, risks, extra
+   checks and, for email steps, a rewritten draft. The guardrails are in code, not
+   in the prompt:
+   - **Required facts.** The executor derives the facts a template inserts
+     (amounts, dates, names, tickers) and blocks any outgoing email that drops
+     one, whether the draft came from the template, from Claude or from a person.
+     A Claude draft with a missing fact is flagged in the UI before anyone tries.
+   - Recipients come from plan contacts, never from the model. A non-email step
+     never gets a draft, even if the model returns one.
+   - Sponsor-supplied data goes in delimited data blocks, and the system prompt
+     says to treat it as data and to report embedded instructions as a risk.
+   - Results are cached per task, keyed by a hash of the prompt, so unchanged
+     tasks don't pay twice. Each call is audited with model, served-by model and
+     token usage.
+   - The engine records whether each sent email started from the template or
+     from Claude, and measures edits against that draft. Insights reports both edit
+     rates and suggests template or prompt reviews.
 
 ## Task state machine
 
@@ -131,4 +153,4 @@ actual contract terms.
 | In-process `advance()` | Durable workflow engine or job queue (e.g. Temporal, or a DB-backed outbox), so AUTO steps retry with backoff |
 | `x-user-id` header | OIDC/SAML login; authorization by role and skill |
 | Regex "OCR" parser | IDP/OCR service with per-field confidence and low-confidence review |
-| Rule-based guidance | Add an LLM `GuidanceEnricher` grounded on the knowledge base (drafting, summarising sponsor emails, spotting anomalies) |
+| On-demand Claude assist | Build an eval set from real cases before changing the prompt or model; consider pre-generating assists when tasks become ready; add retrieval over policy documents for the knowledge base |

@@ -17,6 +17,7 @@
       "id": "fee-disclosure",
       "name": "Send updated 408(b)(2) disclosure",
       "skill": "COMPLIANCE",
+      "minSkillLevel": 2,
       "mode": "REVIEW",
       "action": { "type": "email.send", "params": { "template": "fee-disclosure", "to": ["PLAN_ADMINISTRATOR"], "useRequestFees": true } },
       "dependsOn": ["validate-request"],

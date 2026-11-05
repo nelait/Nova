@@ -4,6 +4,8 @@ import { extname, join, normalize } from 'node:path';
 import { createApp, type App } from '../app.ts';
 import { NotFoundError, ValidationError } from '../store/db.ts';
 import { ActionError } from '../actions/executor.ts';
+import Anthropic from '@anthropic-ai/sdk';
+import { AiError } from '../ai/claudeAssist.ts';
 
 type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string }) => unknown;
 
@@ -68,6 +70,9 @@ route('GET', '/api/queue/unassigned', ({ app }) => app.cases.unassignedQueue());
 route('GET', '/api/tasks/:id/guidance', ({ app, params, actor }) => app.guidance.forTask(app.cases.contextFor(app.repos.tasks.require(params.id), actor)));
 route('POST', '/api/tasks/:id/start', ({ app, params, actor }) => app.cases.startTask(params.id, actor));
 route('POST', '/api/tasks/:id/complete', ({ app, params, body, actor }) => app.cases.completeTask(params.id, actor, body));
+route('GET', '/api/ai/status', ({ app }) => ({ enabled: app.ai.enabled, model: app.ai.model }));
+route('GET', '/api/tasks/:id/ai-assist', ({ app, params, actor }) => app.ai.cached(params.id, actor));
+route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor }) => app.ai.assist(params.id, actor, !!body.refresh));
 route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor }) => app.cases.reassign(params.id, actor, body.toUserId));
 
 // --- integrations & learning
@@ -117,6 +122,11 @@ export function startServer(app: App, port: number, publicDir: string) {
       if (e instanceof ValidationError || e instanceof ActionError || e instanceof SyntaxError) {
         return send(res, 422, { error: (e as Error).message, issues: (e as ValidationError).issues ?? [] });
       }
+      if (e instanceof AiError) return send(res, 503, { error: e.message });
+      if (e instanceof Anthropic.RateLimitError) return send(res, 429, { error: 'Claude is rate limited; try again shortly' });
+      if (e instanceof Anthropic.AuthenticationError) return send(res, 503, { error: 'Claude rejected the API credentials' });
+      if (e instanceof Anthropic.APIConnectionError) return send(res, 503, { error: 'Could not reach Claude' });
+      if (e instanceof Anthropic.APIError) return send(res, 502, { error: `Claude API error ${e.status}` });
       console.error(e);
       send(res, 500, { error: 'Internal error' });
     }

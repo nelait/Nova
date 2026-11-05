@@ -1,5 +1,5 @@
 import type { Case, Contact, FeeSchedule, Fund, Plan, Task } from '../domain/types.ts';
-import { newId, render } from '../domain/util.ts';
+import { getPath, newId, render } from '../domain/util.ts';
 import type { KnowledgeBase } from '../knowledge/knowledgeBase.ts';
 import { RULESETS } from '../intake/rules.ts';
 import type { RecordkeeperAdapter } from '../integrations/recordkeeper.ts';
@@ -29,7 +29,16 @@ export interface TerminationFees {
 /** What a step WILL do, shown to the user before anything leaves the building. */
 export type PreparedAction =
   | { kind: 'check'; issues: string[] }
-  | { kind: 'email'; template: string; to: string[]; cc: string[]; subject: string; body: string }
+  | {
+      kind: 'email';
+      template: string;
+      to: string[];
+      cc: string[];
+      subject: string;
+      body: string;
+      /** Facts the template puts in the email. Any rewrite (by a person or AI) must keep them. */
+      requiredFacts: string[];
+    }
   | { kind: 'system-update'; target: string; operation: string; payload: unknown }
   | { kind: 'calculation'; result: TerminationFees }
   | { kind: 'manual' };
@@ -131,6 +140,8 @@ export class ActionExecutor {
         const subject = edits?.subject ?? draft.subject;
         const body = edits?.body ?? draft.body;
         if (/\[MISSING:/.test(subject + body)) throw new ActionError('Email still contains missing fields', [...(subject + body).matchAll(/\[MISSING:([\w.]+)\]/g)].map((m) => m[1]));
+        const dropped = missingFacts(draft.requiredFacts, subject + '\n' + body);
+        if (dropped.length) throw new ActionError('Email is missing required facts from the template; keep them verbatim', dropped);
         const sent = this.email.send({
           id: newId('msg'),
           caseId: kase.id,
@@ -224,8 +235,35 @@ export class ActionExecutor {
       cc: ccContacts.map((c) => c.email),
       subject: render(tpl.subject, renderCtx),
       body: render(tpl.body, renderCtx),
+      requiredFacts: requiredFacts(tpl.subject + '\n' + tpl.body, renderCtx, funds),
     };
   }
+}
+
+/**
+ * The values a template substitutes into an email (amounts, dates, names, ids).
+ * Greetings are excluded so a rewrite may address the recipient differently;
+ * a fund lineup contributes its tickers.
+ */
+export function requiredFacts(template: string, ctx: unknown, funds: Fund[]): string[] {
+  const facts = new Set<string>();
+  for (const [, path] of template.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)) {
+    if (path.startsWith('recipient.')) continue;
+    if (path === 'request.lineupText') {
+      funds.forEach((f) => facts.add(f.ticker));
+      continue;
+    }
+    const v = getPath(ctx, path);
+    if ((typeof v === 'string' && v.trim()) || typeof v === 'number') facts.add(String(v).trim());
+  }
+  return [...facts];
+}
+
+/** Facts not present in the text. Thousands separators are ignored ("4916.44" matches "4,916.44"). */
+export function missingFacts(facts: string[], text: string): string[] {
+  const norm = (x: string) => x.replace(/(\d),(?=\d{3})/g, '$1').toLowerCase();
+  const hay = norm(text);
+  return facts.filter((f) => !hay.includes(norm(f)));
 }
 
 /**

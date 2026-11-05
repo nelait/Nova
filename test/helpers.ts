@@ -1,11 +1,12 @@
 import { createApp, type App } from '../src/app.ts';
 import type { PlanDetails } from '../src/domain/types.ts';
+import type { ModelCall } from '../src/ai/claudeAssist.ts';
 
 export const NOW = new Date('2026-11-05T15:00:00Z');
 
-export function testApp(): App & { tick: (hours: number) => void } {
+export function testApp(aiModel: ModelCall | null = null): App & { tick: (hours: number) => void } {
   let now = NOW.getTime();
-  const app = createApp({ dbPath: ':memory:', seedUsers: true, clock: { now: () => new Date(now) } });
+  const app = createApp({ dbPath: ':memory:', seedUsers: true, clock: { now: () => new Date(now) }, aiModel });
   return Object.assign(app, { tick: (h: number) => void (now += h * 3600_000) });
 }
 
@@ -33,13 +34,20 @@ export function sampleDetails(overrides: Partial<PlanDetails> = {}): PlanDetails
 }
 
 /** Complete every open human task in the case by its assignee until nothing is left. */
-export function workCase(app: App, caseId: string, opts: { edits?: (stepId: string) => { subject?: string; body?: string } | undefined } = {}): void {
+type Draft = { subject: string; body: string };
+export function workCase(
+  app: App,
+  caseId: string,
+  opts: { edits?: (stepId: string, draft: Draft | undefined) => Partial<Draft> | undefined } = {},
+): void {
   for (let i = 0; i < 50; i++) {
     const open = app.cases.tasksFor(caseId).filter((t) => (t.status === 'READY' || t.status === 'IN_PROGRESS') && t.assigneeId);
     if (open.length === 0) return;
     for (const t of open) {
       app.cases.startTask(t.id, t.assigneeId!);
-      app.cases.completeTask(t.id, t.assigneeId!, { notes: 'ok', edits: opts.edits?.(t.stepId) });
+      const prepared = app.guidance.forTask(app.cases.contextFor(t, t.assigneeId!)).prepared;
+      const draft = prepared?.kind === 'email' ? { subject: prepared.subject, body: prepared.body } : undefined;
+      app.cases.completeTask(t.id, t.assigneeId!, { notes: 'ok', edits: opts.edits?.(t.stepId, draft) });
     }
   }
   throw new Error('workCase did not converge');

@@ -94,7 +94,7 @@ test('insights: suggests promoting a never-edited review step and fixing an ofte
       { caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ ein: `12-345678${i}` }) } },
       'portal',
     );
-    workCase(app, kase.id, { edits: (step) => (step === 'welcome-email' ? { body: 'Hand-written welcome' } : undefined) });
+    workCase(app, kase.id, { edits: (step, d) => (step === 'welcome-email' ? { body: d!.body + '\nP.S. Your kickoff call is next week.' } : undefined) });
   }
   const ins = app.insights();
   assert.equal(ins.cases.completed, 5);
@@ -112,4 +112,23 @@ test('onboarding data cannot be edited once the plan is live on TRAC', () => {
   const app = testApp();
   const { plan } = installPlan(app);
   assert.throws(() => app.cases.updatePlanDetails(plan.id, { employeeCount: 1 }, 'u_priya'), /maintenance request/);
+});
+
+test('rewritten emails must keep the facts the template put in them', () => {
+  const app = testApp();
+  const { case: kase } = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } }, 'portal');
+  const t = Object.fromEntries(app.cases.tasksFor(kase.id).map((x) => [x.stepId, x]));
+  app.cases.completeTask(t['review-fund-lineup'].id, 'u_sam');
+  const fee = app.repos.tasks.require(app.cases.tasksFor(kase.id).find((x) => x.stepId === 'fee-disclosure')!.id);
+  const g = app.guidance.forTask(app.cases.contextFor(fee, fee.assigneeId!));
+  assert.ok(g.prepared?.kind === 'email');
+  if (g.prepared?.kind !== 'email') return;
+  assert.ok(g.prepared.requiredFacts.includes('Acme Robotics Inc.'));
+  assert.ok(g.prepared.requiredFacts.includes('2500'));
+  // Dropping the deconversion fee is blocked...
+  const body = g.prepared.body.replace(/.*Deconversion fee.*\n/, '');
+  assert.throws(() => app.cases.completeTask(fee.id, fee.assigneeId!, { edits: { body } }), (e: Error & { issues?: string[] }) => e.issues?.includes('2500') === true);
+  // ...but rewording that keeps every fact (with thousands separators) is fine.
+  const reworded = g.prepared.body.replace('$2500', '$2,500').replace('Dear Jane Doe', 'Hello Jane');
+  assert.equal(app.cases.completeTask(fee.id, fee.assigneeId!, { edits: { body: reworded } }).status, 'DONE');
 });

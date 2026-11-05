@@ -53,6 +53,7 @@
       "id": "fee-disclosure",
       "name": "Send 408(b)(2) service provider fee disclosure",
       "skill": "COMPLIANCE",
+      "minSkillLevel": 2,
       "mode": "REVIEW",
       "action": { "type": "email.send", "params": { "template": "fee-disclosure", "to": ["PLAN_ADMINISTRATOR"] } },
       "dependsOn": ["review-fund-lineup"],

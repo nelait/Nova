@@ -20,7 +20,11 @@ export interface CompleteInput {
   notes?: string;
   /** Only for steps in exception: accept the step as done without re-running it. Requires notes. */
   override?: boolean;
+  /** Which draft the user started from when editing an email. */
+  draftSource?: 'template' | 'ai';
 }
+
+export type DraftLookup = (taskId: string) => { subject: string; body: string } | undefined;
 
 const OPEN: Task['status'][] = ['READY', 'IN_PROGRESS'];
 
@@ -38,6 +42,7 @@ export class CaseService {
   private rk: RecordkeeperAdapter;
   private users: UserDirectory;
   private clock: Clock;
+  private aiDraftFor?: DraftLookup;
 
   constructor(r: Repos, kb: KnowledgeBase, exec: ActionExecutor, rk: RecordkeeperAdapter, users: UserDirectory, clock: Clock) {
     this.r = r;
@@ -46,6 +51,15 @@ export class CaseService {
     this.rk = rk;
     this.users = users;
     this.clock = clock;
+  }
+
+  get repos(): Repos {
+    return this.r;
+  }
+
+  /** Lets the engine measure edits against Claude's draft when the user started from it. */
+  setAiDraftLookup(fn: DraftLookup): void {
+    this.aiDraftFor = fn;
   }
 
   private now(): string {
@@ -263,12 +277,19 @@ export class CaseService {
       try {
         const outcome = this.exec.execute(this.contextFor(t, userId), input.edits);
         if (outcome.plan) this.r.plans.update({ ...outcome.plan, updatedAt: this.now() });
+        let draftEdited = outcome.draftEdited;
+        let draftSource: Task['draftSource'];
+        if (draftEdited !== undefined) {
+          const ai = input.draftSource === 'ai' ? this.aiDraftFor?.(t.id) : undefined;
+          draftSource = ai ? 'ai' : 'template';
+          if (ai) draftEdited = (input.edits?.subject ?? '') !== ai.subject || (input.edits?.body ?? '') !== ai.body;
+        }
         t = this.save(
           t,
-          { status: 'DONE', completedAt: this.now(), result: outcome.result, draftEdited: outcome.draftEdited, exception: undefined },
+          { status: 'DONE', completedAt: this.now(), result: outcome.result, draftEdited, draftSource, exception: undefined },
           userId,
           'executed',
-          { result: outcome.result, draftEdited: outcome.draftEdited, notes: input.notes },
+          { result: outcome.result, draftEdited, draftSource, notes: input.notes },
         );
       } catch (e) {
         const issues = e instanceof ActionError ? e.issues : [];

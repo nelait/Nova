@@ -139,6 +139,8 @@ export interface Task {
   /** Set when an AUTO step failed and was handed to a human. */
   exception?: string;
   draftEdited?: boolean;
+  /** For email steps: whether the sent email started from the template or Claude's draft. */
+  draftSource?: 'template' | 'ai';
   result?: unknown;
   createdAt: string;
   readyAt?: string;

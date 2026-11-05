@@ -11,12 +11,23 @@ import { UserDirectory } from './users/userDirectory.ts';
 import { CaseService } from './cases/caseService.ts';
 import { GuidanceService } from './guidance/guidedActions.ts';
 import { computeInsights } from './learning/insights.ts';
+import { AiAssistService, claudeModelCall, type AiAssist, type ModelCall } from './ai/claudeAssist.ts';
 
 export interface AppOptions {
   dbPath?: string; // ':memory:' for tests
   configDir?: string;
   clock?: Clock;
   seedUsers?: boolean;
+  /**
+   * Model transport for AI assistance. Default: Claude when Anthropic credentials are
+   * in the environment, otherwise disabled. Pass `null` to force-disable.
+   */
+  aiModel?: ModelCall | null;
+}
+
+function hasAnthropicCredentials(): boolean {
+  if (process.env.AI_ASSIST === 'off') return false;
+  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_PROFILE);
 }
 
 /** Composition root: wires stores, integrations and services together. */
@@ -41,6 +52,9 @@ export function createApp(opts: AppOptions = {}) {
   const users = new UserDirectory(usersRepo);
   const cases = new CaseService(repos, kb, executor, trac, users, clock);
   const guidance = new GuidanceService(kb, executor);
+  const aiModel = opts.aiModel === undefined ? (hasAnthropicCredentials() ? claudeModelCall() : undefined) : (opts.aiModel ?? undefined);
+  const ai = new AiAssistService(cases, guidance, new Collection<AiAssist>(db, 'ai_assists'), clock, aiModel);
+  cases.setAiDraftLookup((taskId) => ai.draftFor(taskId));
 
   if (opts.seedUsers && users.list().length === 0) {
     users.import(JSON.parse(readFileSync(join(configDir, 'users.json'), 'utf8')), 'seed');
@@ -55,6 +69,7 @@ export function createApp(opts: AppOptions = {}) {
     users,
     cases,
     guidance,
+    ai,
     insights: () => computeInsights(repos.cases.all(), repos.tasks.all(), users.list(), clock.now()),
   };
 }

@@ -9,12 +9,14 @@ export interface StepStats {
   avgHandleMinutes: number | null;
   autoFailures: number;
   overrides: number;
-  draftEditRate: number | null; // share of executed drafts the user changed
+  draftEditRate: number | null; // share of template drafts the user changed
+  aiDraftsUsed: number; // emails sent starting from Claude's draft
+  aiDraftEditRate: number | null; // share of those the user still changed
   overdueOpen: number;
 }
 
 export interface Suggestion {
-  kind: 'promote-to-auto' | 'fix-template' | 'fix-automation' | 'add-capacity' | 'review-sla';
+  kind: 'promote-to-auto' | 'fix-template' | 'fix-automation' | 'add-capacity' | 'review-sla' | 'review-ai-drafts';
   target: string;
   message: string;
 }
@@ -48,7 +50,9 @@ export function computeInsights(cases: Case[], tasks: Task[], users: User[], now
     const [ct, stepId] = k.split('|');
     const done = ts.filter((t) => t.status === 'DONE');
     const handled = done.filter((t) => t.startedAt && t.completedAt);
-    const drafts = done.filter((t) => t.draftEdited !== undefined);
+    const allDrafts = done.filter((t) => t.draftEdited !== undefined);
+    const drafts = allDrafts.filter((t) => t.draftSource !== 'ai');
+    const aiDrafts = allDrafts.filter((t) => t.draftSource === 'ai');
     const autoFailures = ts.filter((t) => t.history.some((h) => h.event === 'auto-failed')).length;
     const overrides = ts.filter((t) => t.history.some((h) => h.event === 'overridden')).length;
     const s: StepStats = {
@@ -63,16 +67,32 @@ export function computeInsights(cases: Case[], tasks: Task[], users: User[], now
       autoFailures,
       overrides,
       draftEditRate: drafts.length ? drafts.filter((t) => t.draftEdited).length / drafts.length : null,
+      aiDraftsUsed: aiDrafts.length,
+      aiDraftEditRate: aiDrafts.length ? aiDrafts.filter((t) => t.draftEdited).length / aiDrafts.length : null,
       overdueOpen: ts.filter((t) => (t.status === 'READY' || t.status === 'IN_PROGRESS') && t.dueAt && t.dueAt < nowIso).length,
     };
     steps.push(s);
     const target = `${ct} / ${stepId}`;
 
-    if (s.mode === 'REVIEW' && drafts.length >= minSample && s.draftEditRate === 0) {
+    if (s.mode === 'REVIEW' && drafts.length >= minSample && s.draftEditRate === 0 && aiDrafts.length === 0) {
       suggestions.push({ kind: 'promote-to-auto', target, message: `All ${drafts.length} drafts were approved unchanged. Consider making this step AUTO (or AUTO for selected clients).` });
     }
     if (drafts.length >= minSample && (s.draftEditRate ?? 0) >= 0.5) {
       suggestions.push({ kind: 'fix-template', target, message: `${Math.round(s.draftEditRate! * 100)}% of drafts were edited before sending. Review the template; users are correcting it by hand.` });
+    }
+    if (allDrafts.length >= minSample && aiDrafts.length / allDrafts.length >= 0.5) {
+      suggestions.push({
+        kind: 'fix-template',
+        target,
+        message: `Users chose Claude's rewrite over the template for ${aiDrafts.length}/${allDrafts.length} emails. Consider updating the template wording.`,
+      });
+    }
+    if (aiDrafts.length >= minSample && (s.aiDraftEditRate ?? 0) >= 0.5) {
+      suggestions.push({
+        kind: 'review-ai-drafts',
+        target,
+        message: `${Math.round(s.aiDraftEditRate! * 100)}% of Claude's drafts were still edited before sending. Review the step guidance Claude is given.`,
+      });
     }
     if (ts.length >= minSample && autoFailures / ts.length >= 0.3) {
       suggestions.push({ kind: 'fix-automation', target, message: `${autoFailures}/${ts.length} automated runs failed and needed a person. Fix the upstream data or the integration.` });

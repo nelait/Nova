@@ -2,9 +2,11 @@
   "name": "plan-ops",
   "version": "0.1.0",
   "private": true,
-  "description": "Retirement plan operations hub: onboarding/installation, maintenance and termination workflows with skill routing, guided actions and recordkeeper (TRAC) integration.",
+  "description": "Retirement plan operations hub: onboarding/installation, maintenance and termination workflows with skill routing, guided actions, Claude-assisted drafting and recordkeeper (TRAC) integration.",
   "type": "module",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
@@ -13,5 +15,9 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
+    "zod": "^4.6.7"
   }
 }

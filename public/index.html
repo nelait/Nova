@@ -53,6 +53,10 @@
   .steps { display: flex; flex-direction: column; gap: 4px; }
   .step { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
   ul.check { padding-left: 0; list-style: none; margin: 0; } ul.check li { margin: 3px 0; }
+  .ai { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 12px 0; }
+  .ai .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ai h3 { margin: 0; color: var(--accent); }
+  .alert.high { border-color: var(--bad); } .alert.low { border-color: var(--line); }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px; }
   .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; } .kpi b { font-size: 22px; display: block; }
 </style>
@@ -69,7 +73,7 @@
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const state = { tab: 'inbox', user: null, selTask: null, selCase: null };
+const state = { tab: 'inbox', user: null, selTask: null, selCase: null, ai: { enabled: false } };
 
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, { method: opts.method ?? 'GET', headers: { 'content-type': 'application/json', 'x-user-id': state.user ?? 'anonymous' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
@@ -123,6 +127,7 @@ async function renderTaskDetail(el, taskId) {
     <div><span class="chip ${g.mode}">${g.mode}</span><span class="small muted">${esc(g.modeExplanation)}</span></div>
     ${g.exception ? `<div class="alert bad"><b>Exception:</b> ${esc(g.exception)}</div>` : ''}
     ${g.alerts.map((a) => `<div class="alert">${esc(a)}</div>`).join('')}
+    ${state.ai.enabled ? `<div class="ai" id="aiBox"><div class="head"><h3>Claude</h3><button class="btn secondary" id="aiAsk">Ask Claude</button></div><div id="aiBody" class="small muted">Get a case-specific briefing, risks found in the data${p?.kind === 'email' ? ', and a rewritten email draft' : ''}.</div></div>` : ''}
     <h3>Guidance</h3><p>${esc(g.guidance)}</p>
     ${g.regulatoryRef ? `<p class="small"><b>Reference:</b> ${esc(g.regulatoryRef)}</p>` : ''}
     ${g.checklist.length ? `<h3>Checklist</h3><ul class="check">${g.checklist.map((c, i) => `<li><label style="display:inline;font-weight:400"><input type="checkbox" style="width:auto" data-ck="${i}"> ${esc(c)}</label></li>`).join('')}</ul>` : ''}
@@ -142,10 +147,40 @@ async function renderTaskDetail(el, taskId) {
     const boxes = [...el.querySelectorAll('[data-ck]')];
     if ((act === 'confirm' || act === 'approve') && boxes.some((b) => !b.checked)) throw new Error('Complete the checklist first');
     const body = { notes, override: act === 'override' };
-    if ($('#subj')) body.edits = { subject: $('#subj').value, body: $('#body').value };
+    if ($('#subj')) { body.edits = { subject: $('#subj').value, body: $('#body').value }; body.draftSource = el.dataset.draftSource || 'template'; }
     await api(`/tasks/${taskId}/complete`, { method: 'POST', body });
     toast('Done'); state.selTask = null; render();
   });
+  if (state.ai.enabled) {
+    el.dataset.draftSource = 'template';
+    const template = p?.kind === 'email' ? { subject: p.subject, body: p.body } : null;
+    const show = (a) => renderAiAssist($('#aiBody'), a, el, template);
+    $('#aiAsk').onclick = () => guarded(async () => {
+      const btn = $('#aiAsk'); const regen = btn.dataset.has === '1';
+      btn.disabled = true; btn.textContent = 'Claude is reviewing…';
+      try { const a = await api(`/tasks/${taskId}/ai-assist`, { method: 'POST', body: { refresh: regen } }); show(a); btn.dataset.has = '1'; }
+      finally { btn.disabled = false; btn.textContent = $('#aiAsk').dataset.has === '1' ? 'Regenerate' : 'Ask Claude'; }
+    });
+    const prior = await api(`/tasks/${taskId}/ai-assist`).catch(() => null);
+    if (prior) { show(prior); $('#aiAsk').dataset.has = '1'; $('#aiAsk').textContent = 'Regenerate'; }
+  }
+}
+
+function renderAiAssist(box, a, detailEl, template) {
+  const d = a.emailDraft;
+  box.classList.remove('muted');
+  box.innerHTML = `<p style="font-size:14px">${esc(a.briefing)}</p>
+    ${a.risks.map((r) => `<div class="alert ${r.severity}"><span class="chip">${r.severity}</span>${esc(r.message)}</div>`).join('')}
+    ${a.checks.length ? `<b>Also check</b><ul>${a.checks.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
+    ${d ? `<b>Suggested email</b> <span class="muted">${esc(d.changes)}</span>
+      ${d.missingFacts.length ? `<div class="alert high">This draft dropped required facts: ${d.missingFacts.map(esc).join(', ')}. It can't be sent until they're restored.</div>` : ''}
+      <pre style="margin:6px 0">${esc(d.subject)}\n\n${esc(d.body)}</pre>
+      <div class="actions" style="margin-top:6px"><button class="btn secondary" id="aiUse">Use Claude's draft</button>${template ? '<button class="btn secondary" id="aiRevert">Back to template</button>' : ''}</div>` : ''}
+    <div class="muted" style="margin-top:6px">Advisory. Generated by ${esc(a.servedBy)}${a.servedBy !== a.model ? ` (fallback from ${esc(a.model)})` : ''}${a.cached ? ' · saved result' : ''} · verify before acting.</div>`;
+  const use = box.querySelector('#aiUse');
+  if (use) use.onclick = () => { $('#subj').value = d.subject; $('#body').value = d.body; detailEl.dataset.draftSource = 'ai'; toast("Claude's draft loaded into the editor"); };
+  const rev = box.querySelector('#aiRevert');
+  if (rev) rev.onclick = () => { $('#subj').value = template.subject; $('#body').value = template.body; detailEl.dataset.draftSource = 'template'; };
 }
 
 // ---------------------------------------------------------------- intake
@@ -248,9 +283,9 @@ async function renderInsights(v) {
     <div class="kpi"><b>${i.cases.avgCycleHours ?? '—'}</b><span class="muted small">avg cycle (hours)</span></div><div class="kpi"><b>${Object.values(i.backlogBySkill).reduce((a, b) => a + b, 0)}</b><span class="muted small">unrouted tasks</span></div></div>
     <div class="panel"><h2>Suggested process improvements</h2><p class="small muted">Suggestions only. A process owner decides whether to change a playbook or template.</p>
     ${i.suggestions.map((s) => `<div class="alert"><span class="chip">${s.kind}</span><b>${esc(s.target)}</b>: ${esc(s.message)}</div>`).join('') || '<p class="muted small">Not enough history yet (needs about 5 completions per step).</p>'}
-    <h3>Step performance</h3><div class="scroll"><table><tr><th>Case type</th><th>Step</th><th>Mode</th><th>Done</th><th>Avg handle (min)</th><th>Auto failures</th><th>Overrides</th><th>Draft edit rate</th><th>Overdue</th></tr>
+    <h3>Step performance</h3><div class="scroll"><table><tr><th>Case type</th><th>Step</th><th>Mode</th><th>Done</th><th>Avg handle (min)</th><th>Auto failures</th><th>Overrides</th><th>Template edit rate</th><th>Claude drafts used</th><th>Claude draft edit rate</th><th>Overdue</th></tr>
     ${i.steps.map((s) => `<tr><td class="small">${s.caseType}</td><td>${esc(s.name)}</td><td><span class="chip ${s.mode}">${s.mode}</span></td><td>${s.completed}</td><td>${s.avgHandleMinutes ?? '—'}</td><td>${s.autoFailures}</td><td>${s.overrides}</td>
-      <td>${s.draftEditRate === null ? '—' : Math.round(s.draftEditRate * 100) + '%'}</td><td>${s.overdueOpen}</td></tr>`).join('')}</table></div></div>`;
+      <td>${s.draftEditRate === null ? '—' : Math.round(s.draftEditRate * 100) + '%'}</td><td>${s.aiDraftsUsed}</td><td>${s.aiDraftEditRate === null ? '—' : Math.round(s.aiDraftEditRate * 100) + '%'}</td><td>${s.overdueOpen}</td></tr>`).join('')}</table></div></div>`;
 }
 
 const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
@@ -263,7 +298,7 @@ async function loadUsers() {
   $('#userSel').innerHTML = users.filter((u) => u.active).map((u) => `<option value="${u.id}" ${u.id === state.user ? 'selected' : ''}>${esc(u.name)} (${u.openTasks})</option>`).join('');
 }
 setInterval(() => { if (state.tab !== 'intake' && state.tab !== 'team' && !document.activeElement?.matches('input,textarea')) loadUsers(); }, 5000);
-loadUsers().then(() => { renderTabs(); render(); });
+Promise.all([loadUsers(), api('/ai/status').then((s) => (state.ai = s)).catch(() => {})]).then(() => { renderTabs(); render(); });
 </script>
 </body>
 </html>
