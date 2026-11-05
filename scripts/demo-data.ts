@@ -158,7 +158,7 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
       edits = { subject: d.subject, body: style.edit ? d.body.replace('Kind regards,', 'If anything here looks off, just reply to this email.\n\nKind regards,') : d.body };
       draftSource = 'template';
     }
-    app.cases.completeTask(t.id, u, { notes: 'Checked against sponsor paperwork', edits, draftSource });
+    await app.cases.completeTask(t.id, u, { notes: 'Checked against sponsor paperwork', edits, draftSource });
     tick(0.5, 5);
   }
 
@@ -171,8 +171,8 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
     }
   }
 
-  const intake = (body: Parameters<App['cases']['submitIntake']>[0], by = 'portal') => {
-    const r = app.cases.submitIntake(body, by);
+  const intake = async (body: Parameters<App['cases']['submitIntake']>[0], by = 'portal') => {
+    const r = await app.cases.submitIntake(body, by);
     tick(1, 4);
     return r.case;
   };
@@ -188,14 +188,14 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
     [plan({ sponsorName: 'Solstice Solar Installers', ein: '88-2017745', employeeCount: 160, effectiveDate: '2026-12-15' }, 'solstice.example', 'Ana Ruiz'), 'default', { ai: ['welcome-email'], edit: [] }],
   ];
   for (const [details, clientId, style] of completed) {
-    const c = intake({ caseType: 'INSTALLATION', channel: 'DIGITAL', clientId, data: { details } });
+    const c = await intake({ caseType: 'INSTALLATION', channel: 'DIGITAL', clientId, data: { details } });
     await run(c.id, style);
     installed[details.sponsorName] = c.planId;
     tick(6, 20);
   }
 
   // A paper-form installation, also completed.
-  const paper = intake(
+  const paper = await intake(
     {
       caseType: 'INSTALLATION',
       channel: 'PAPER',
@@ -220,9 +220,9 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
   installed['Bluebird Bakery LLC'] = paper.planId;
 
   // ---- Maintenance history
-  const fees = intake({ caseType: 'MAINTENANCE_FEES', channel: 'MANUAL', planId: installed['Northwind Analytics Inc.'], data: { fees: { recordkeepingBps: 6, perParticipantUsd: 36, terminationBaseUsd: 2500 } } }, 'u_marcus');
+  const fees = await intake({ caseType: 'MAINTENANCE_FEES', channel: 'MANUAL', planId: installed['Northwind Analytics Inc.'], data: { fees: { recordkeepingBps: 6, perParticipantUsd: 36, terminationBaseUsd: 2500 } } }, 'u_marcus');
   await run(fees.id);
-  const contact = intake({ caseType: 'MAINTENANCE_CONTACT', channel: 'DIGITAL', planId: installed['Bluebird Bakery LLC'], data: { contact: { role: 'PAYROLL', name: 'Luca Romano', email: 'luca.romano@bluebird.example' } } });
+  const contact = await intake({ caseType: 'MAINTENANCE_CONTACT', channel: 'DIGITAL', planId: installed['Bluebird Bakery LLC'], data: { contact: { role: 'PAYROLL', name: 'Luca Romano', email: 'luca.romano@bluebird.example' } } });
   await run(contact.id);
 
   // ---- Work in progress (what people see in their inboxes today)
@@ -230,7 +230,7 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
   clock.goLive();
 
   // Termination: Tidewater is leaving. Fees awaiting Dana; blackout notice is tight.
-  const term = intake({
+  const term = await intake({
     caseType: 'TERMINATION',
     channel: 'DIGITAL',
     planId: installed['Tidewater Logistics Co.'],
@@ -239,7 +239,7 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
   await run(term.id, { stopAt: ['calculate-fees', 'blackout-notice'] });
 
   // Fund change at Cedar Ridge: investment review waiting on Sam.
-  intake({
+  await intake({
     caseType: 'MAINTENANCE_FUNDS',
     channel: 'DIGITAL',
     planId: installed['Cedar Ridge Health Partners'],
@@ -247,7 +247,7 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
   });
 
   // Suspicious contact change at Orchard Lane: verification waiting on Elena.
-  intake({
+  await intake({
     caseType: 'MAINTENANCE_CONTACT',
     channel: 'DIGITAL',
     planId: installed['Orchard Lane Schools'],
@@ -255,7 +255,7 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
   });
 
   // New installation mid-flight: fee disclosure waiting on Elena, welcome email waiting on Priya.
-  const summit = intake({
+  const summit = await intake({
     caseType: 'INSTALLATION',
     channel: 'DIGITAL',
     data: { details: plan({ sponsorName: 'Summit Peak Outfitters', ein: '74-3302918', employeeCount: 210, effectiveDate: '2026-12-15' }, 'summitpeak.example', 'Rachel Whitfield') },
@@ -263,7 +263,7 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
   await run(summit.id, { stopAt: ['fee-disclosure', 'welcome-email'] });
 
   // Installation with bad data: validation exception routed to Priya.
-  intake({
+  await intake({
     caseType: 'INSTALLATION',
     channel: 'MANUAL',
     data: {
@@ -274,6 +274,20 @@ export async function seedDemo(app: App, clock: DemoClock): Promise<{ cases: num
       ),
     },
   }, 'u_marcus');
+
+  // Installation whose lineup includes a fund the catalog reports as closed:
+  // the integration step succeeds, the availability rules stop it for Sam.
+  await intake({
+    caseType: 'INSTALLATION',
+    channel: 'DIGITAL',
+    data: {
+      details: plan(
+        { sponsorName: 'Pinecrest Veterinary Clinics', ein: '56-2093318', employeeCount: 140, funds: [VANGUARD.sp500, VANGUARD.bond, { ticker: 'XCLSX', name: 'Example Closed Growth Fund' }, VANGUARD.td2060] },
+        'pinecrestvet.example',
+        'Noah Brandt',
+      ),
+    },
+  });
 
   // Pre-generate Claude panels for a few open tasks so they show immediately.
   for (const t of app.repos.tasks.find((t) => (t.status === 'READY' || t.status === 'IN_PROGRESS') && !!t.assigneeId)) {

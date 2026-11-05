@@ -19,6 +19,11 @@ not code: versioned rule sets in `config/rules/` that run as steps in any
 process, can make later steps conditional, and carry their own test cases. See
 [docs/RULES.md](docs/RULES.md).
 
+External systems (TRAC, a fund catalog, …) are configuration too: URL,
+authentication, retries and operations in `config/integrations/`. Process steps
+call them with `integration.call`. Built-in mocks are used until you set the
+real URLs. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## Screenshots
@@ -30,6 +35,7 @@ From `npm run demo` (fictional sponsors; the Claude panels show labeled sample r
 | ![Fee disclosure with Claude's draft](docs/screenshots/01-inbox-claude-draft.png) **My work:** a 408(b)(2) disclosure with guidance, Claude's briefing and rewritten draft | ![Contact change flagged](docs/screenshots/02-contact-change-risk.png) **Contact change:** Claude flags a new admin email on a free-mail domain |
 | ![Validation exception](docs/screenshots/03-validation-exception.png) **Exception:** bad EIN and two QDIAs routed to a person to fix, retry or override | ![Termination fees](docs/screenshots/04-termination-fees.png) **Termination:** fee calculation for review, with a blackout-notice timing risk |
 | ![Case detail](docs/screenshots/05-case-detail.png) **Cases:** step status, assignees and the audit trail | ![Insights](docs/screenshots/10-insights.png) **Insights:** step metrics and suggested process changes |
+| ![Integrations](docs/screenshots/14-integrations.png) **Integrations:** configured systems, auth and secret status, operations, connection test, call log | ![Integration then rules](docs/screenshots/16-case-integration-then-rules.png) **Integration → rules:** the fund catalog lookup succeeds; the availability rules stop a closed fund |
 | ![Rules screen](docs/screenshots/12-rules-screen.png) **Rules:** a rule set's decision table, formulas and checks; tests run; evaluated against a live case | ![Step skipped by a rule](docs/screenshots/13-case-step-skipped-by-rule.png) **Conditional step:** enrollment meetings skipped because the rules classified the plan as small |
 
 More: [paper intake](docs/screenshots/06-new-request-paper.png), [team & skills](docs/screenshots/07-team-skills.png), [recordkeeper](docs/screenshots/08-recordkeeper.png), [outbox](docs/screenshots/09-outbox.png), [phone](docs/screenshots/11-mobile-task.png).
@@ -93,6 +99,7 @@ config/
   templates/   email templates ({{plan.details.sponsorName}} …)
   clients/     per-client overrides (disable/add steps, change modes, swap templates and rule sets)
   rules/       versioned business rule sets with embedded test cases
+  integrations/ external systems: URL, auth, retry policy, operations
   users.json   seed users and skills
 src/
   intake/      channel normalization + validation rule sets
@@ -106,6 +113,7 @@ src/
   learning/    insights & improvement suggestions
   ai/          Claude assistance (prompt, structured output, caching, guardrails)
   rules/       rule engine: expression language, rule sets, tests
+  integrations/ integration registry and HTTP client; mock TRAC and fund catalog
   api/         HTTP API
 public/        single-page UI (no build step)
 scripts/       demo data and demo server
@@ -122,6 +130,8 @@ test/          end-to-end tests
 | POST | `/api/tasks/:id/complete` | `{edits?, notes?, override?, draftSource?}` (header `x-user-id`) |
 | GET | `/api/rules`, `/api/rules/:id` | rule sets |
 | POST | `/api/rules/:id/test`, `/api/rules/:id/evaluate` | run a rule set's tests; evaluate against `{caseId}` or `{context}` |
+| GET | `/api/integrations`, `/api/integrations/calls` | configured systems; call log |
+| POST | `/api/integrations/:id/test` | run a system's health check |
 | GET | `/api/ai/status` | whether Claude is enabled |
 | GET / POST | `/api/tasks/:id/ai-assist` | stored result / ask Claude (`{refresh?}`) |
 | POST | `/api/tasks/:id/reassign` | `{toUserId?}` |

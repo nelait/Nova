@@ -78,6 +78,7 @@ export interface Case {
 
 export type ActionType =
   | 'rules.evaluate'
+  | 'integration.call'
   | 'contacts.upsert'
   | 'funds.apply'
   | 'fees.apply'

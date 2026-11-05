@@ -4,7 +4,9 @@ import type { AuditEvent, Case, OutboundEmail, Plan, Task, User } from './domain
 import { systemClock, type Clock } from './domain/util.ts';
 import { Collection, openDb } from './store/db.ts';
 import { KnowledgeBase } from './knowledge/knowledgeBase.ts';
-import { MockTracAdapter } from './integrations/recordkeeper.ts';
+import { MockTracStore } from './integrations/recordkeeper.ts';
+import { fundCatalogHandler } from './integrations/fundCatalog.ts';
+import { IntegrationClient, type CallLogEntry, type Transport } from './integrations/client.ts';
 import { OutboxEmailGateway } from './integrations/email.ts';
 import { ActionExecutor } from './actions/executor.ts';
 import { UserDirectory } from './users/userDirectory.ts';
@@ -23,6 +25,12 @@ export interface AppOptions {
    * in the environment, otherwise disabled. Pass `null` to force-disable.
    */
   aiModel?: ModelCall | null;
+  /** Environment for integration URLs and secrets (default: process.env). */
+  env?: Record<string, string | undefined>;
+  /** HTTP transport for real (non-mock) integrations (default: fetch). */
+  transport?: Transport;
+  /** Wait between retries (tests pass a no-op). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 function hasAnthropicCredentials(): boolean {
@@ -45,12 +53,22 @@ export function createApp(opts: AppOptions = {}) {
   const usersRepo = new Collection<User>(db, 'users');
   const outbox = new Collection<OutboundEmail>(db, 'outbox');
 
-  const kb = new KnowledgeBase(configDir);
-  const trac = new MockTracAdapter(db, clock);
+  const env = opts.env ?? process.env;
+  const kb = new KnowledgeBase(configDir, env);
+  const integrations = new IntegrationClient(kb.integrations, new Collection<CallLogEntry>(db, 'integration_calls'), clock, {
+    env,
+    transport: opts.transport,
+    sleep: opts.sleep,
+  });
+  // Built-in mock systems, reachable at mock://<name> when a system's baseUrl points there.
+  const trac = new MockTracStore(db, clock);
+  integrations.registerMock('trac', trac.handler);
+  integrations.registerMock('fund-catalog', fundCatalogHandler);
+
   const email = new OutboxEmailGateway(outbox);
-  const executor = new ActionExecutor(kb, trac, email);
+  const executor = new ActionExecutor(kb, integrations, email);
   const users = new UserDirectory(usersRepo);
-  const cases = new CaseService(repos, kb, executor, trac, users, clock);
+  const cases = new CaseService(repos, kb, executor, integrations, users, clock);
   const guidance = new GuidanceService(kb, executor);
   const aiModel = opts.aiModel === undefined ? (hasAnthropicCredentials() ? claudeModelCall() : undefined) : (opts.aiModel ?? undefined);
   const ai = new AiAssistService(cases, guidance, new Collection<AiAssist>(db, 'ai_assists'), clock, aiModel);
@@ -65,6 +83,7 @@ export function createApp(opts: AppOptions = {}) {
     repos,
     kb,
     trac,
+    integrations,
     email,
     users,
     cases,

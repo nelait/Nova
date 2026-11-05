@@ -11,7 +11,7 @@ const ev = (src: string, ctx: Record<string, unknown> = {}) => compile(src, ROOT
 
 // ------------------------------------------------------------ expression language
 
-test('expressions: arithmetic, precedence, comparison, logic', () => {
+test('expressions: arithmetic, precedence, comparison, logic', async () => {
   assert.equal(ev('1 + 2 * 3'), 7);
   assert.equal(ev('(1 + 2) * 3'), 9);
   assert.equal(ev('10 % 4 - -1'), 3);
@@ -23,7 +23,7 @@ test('expressions: arithmetic, precedence, comparison, logic', () => {
   assert.equal(ev('1_000_000 / 4'), 250000);
 });
 
-test('expressions: reading data and safe navigation', () => {
+test('expressions: reading data and safe navigation', async () => {
   const ctx = { plan: { details: { funds: [{ ticker: 'A', qdia: true }, { ticker: 'B' }], name: 'X' } } };
   assert.equal(ev("countWhere(plan.details.funds, 'qdia', true)", ctx), 1);
   assert.equal(ev("plan.details['name']", ctx), 'X');
@@ -33,7 +33,7 @@ test('expressions: reading data and safe navigation', () => {
   assert.equal(ev('plan.details.missing > 0', ctx), false, 'comparing missing values is false, not an error');
 });
 
-test('expressions: functions', () => {
+test('expressions: functions', async () => {
   assert.equal(ev("daysBetween('2026-11-05', '2027-01-01')"), 57);
   assert.equal(ev("quarterStart('2027-02-15')"), '2027-01-01');
   assert.equal(ev("addDays('2026-12-30', 3)"), '2027-01-02');
@@ -46,7 +46,7 @@ test('expressions: functions', () => {
   assert.equal(ev('coalesce(null, plan.x, 5)', { plan: {} }), 5);
 });
 
-test('expressions: unsafe or invalid input is rejected', () => {
+test('expressions: unsafe or invalid input is rejected', async () => {
   assert.throws(() => compile('process.exit()', ROOTS), RuleError, 'no method calls');
   assert.throws(() => compile('process', ROOTS), /Unknown name "process"/);
   assert.throws(() => compile('globalThis', ROOTS), /Unknown name "globalThis"/);
@@ -62,14 +62,14 @@ test('expressions: unsafe or invalid input is rejected', () => {
   assert.throws(() => compile('('.repeat(100) + '1' + ')'.repeat(100), ROOTS), /nested too deeply/);
 });
 
-test('message templates interpolate expressions', () => {
+test('message templates interpolate expressions', async () => {
   const t = compileTemplate('Found {{ outputs.n }} QDIAs; total {{ usd(outputs.t) }}', ROOTS);
   assert.equal(t({ outputs: { n: 2, t: 1234.5 } }), 'Found 2 QDIAs; total $1,234.50');
 });
 
 // ------------------------------------------------------------ rule engine
 
-test('rule engine: decisions, chained outputs, conditional rules, severities, trace', () => {
+test('rule engine: decisions, chained outputs, conditional rules, severities, trace', async () => {
   const set = compileRuleSet({
     id: 't',
     version: 3,
@@ -95,7 +95,7 @@ test('rule engine: decisions, chained outputs, conditional rules, severities, tr
   assert.equal(evaluateRuleSet(set, { plan: { n: 20 } }).decisions.size.name, 'big');
 });
 
-test('rule sets are checked when they load', () => {
+test('rule sets are checked when they load', async () => {
   assert.throws(() => compileRuleSet({ id: 'x', version: 1, name: 'x', rules: [{ id: 'a', assert: 'plan.n >', message: 'm' }] }), /rule "a" assert/);
   assert.throws(() => compileRuleSet({ id: 'x', version: 1, name: 'x', rules: [{ id: 'a', assert: 'nope.n > 1', message: 'm' }] }), /Unknown name "nope"/);
   assert.throws(() => compileRuleSet({ id: 'x', version: 1, name: 'x', outputs: [{ name: 'a', expr: '1' }, { name: 'a', expr: '2' }] }), /duplicate output/);
@@ -103,7 +103,7 @@ test('rule sets are checked when they load', () => {
   assert.ok(CONTEXT_ROOTS.includes('steps'));
 });
 
-test('every rule set in config passes its own test cases', () => {
+test('every rule set in config passes its own test cases', async () => {
   const reg = new RuleRegistry(join(import.meta.dirname, '..', 'config', 'rules'));
   assert.ok(reg.list().length >= 7);
   for (const s of reg.list()) {
@@ -112,7 +112,7 @@ test('every rule set in config passes its own test cases', () => {
   }
 });
 
-test('playbooks are rejected if they use an unknown rule set or a bad step condition', () => {
+test('playbooks are rejected if they use an unknown rule set or a bad step condition', async () => {
   const reg = new RuleRegistry(join(import.meta.dirname, '..', 'config', 'rules'));
   const pb = (step: object) => ({ id: 'p', version: 1, caseType: 'INSTALLATION' as const, name: '', description: '', steps: [{ id: 's', name: 's', skill: 'X', mode: 'AUTO' as const, guidance: '', ...step }] });
   assert.throws(() => validatePlaybook(pb({ action: { type: 'rules.evaluate', params: { ruleSet: 'nope' } } }) as never, reg), /unknown rule set "nope"/);
@@ -122,12 +122,12 @@ test('playbooks are rejected if they use an unknown rule set or a bad step condi
 
 // ------------------------------------------------------------ rules as process steps
 
-test('rule step result feeds a step condition: small plans skip enrollment meetings', () => {
+test('rule step result feeds a step condition: small plans skip enrollment meetings', async () => {
   const app = testApp();
-  const small = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ employeeCount: 40 }) } }, 'portal');
-  const mid = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ employeeCount: 400, ein: '12-0000001' }) } }, 'portal');
-  workCase(app, small.case.id);
-  workCase(app, mid.case.id);
+  const small = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ employeeCount: 40 }) } }, 'portal');
+  const mid = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ employeeCount: 400, ein: '12-0000001' }) } }, 'portal');
+  await workCase(app, small.case.id);
+  await workCase(app, mid.case.id);
   const step = (caseId: string) => app.cases.tasksFor(caseId).find((t) => t.stepId === 'enrollment-meetings')!;
   assert.equal(step(small.case.id).status, 'SKIPPED');
   assert.ok(step(small.case.id).history.some((h) => h.event === 'skipped'));
@@ -140,25 +140,25 @@ test('rule step result feeds a step condition: small plans skip enrollment meeti
   assert.equal(result.decisions.segment.name, 'small');
 });
 
-test('warnings do not block a rule step; errors become an exception for a person', () => {
+test('warnings do not block a rule step; errors become an exception for a person', async () => {
   const app = testApp();
   // 30 days out: passes validation with a lead-time warning.
-  const { tasks } = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ effectiveDate: '2026-12-05' }) } }, 'portal');
+  const { tasks } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ effectiveDate: '2026-12-05' }) } }, 'portal');
   const v = tasks.find((t) => t.stepId === 'validate-intake')!;
   assert.equal(v.status, 'DONE');
   const issues = (v.result as { issues: { ruleId: string; severity: string }[] }).issues;
   assert.deepEqual(issues.map((i) => [i.ruleId, i.severity]), [['effective-date-lead-time', 'warning']]);
 
-  const bad = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ ein: '12-0000002', fees: { recordkeepingBps: 40, perParticipantUsd: 40, terminationBaseUsd: 2500 }, effectiveDate: '2026-10-01' }) } }, 'portal');
+  const bad = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ ein: '12-0000002', fees: { recordkeepingBps: 40, perParticipantUsd: 40, terminationBaseUsd: 2500 }, effectiveDate: '2026-10-01' }) } }, 'portal');
   const e = bad.tasks.find((t) => t.stepId === 'validate-intake')!;
   assert.match(e.exception!, /in the past/);
   assert.doesNotMatch(e.exception!, /unusually high/, 'warnings are not listed as blocking issues');
 });
 
-test('client rule set override: premium clients have the deconversion fee waived', () => {
+test('client rule set override: premium clients have the deconversion fee waived', async () => {
   const app = testApp();
-  const { plan } = installPlan(app, 'acme-premium');
-  const { case: kase } = app.cases.submitIntake(
+  const { plan } = await installPlan(app, 'acme-premium');
+  const { case: kase } = await app.cases.submitIntake(
     { caseType: 'TERMINATION', channel: 'DIGITAL', planId: plan.id, data: { reason: 'x', successorProvider: 'y', effectiveDate: '2027-02-15', blackoutStart: '2027-02-10', blackoutEnd: '2027-03-05' } },
     'portal',
   );
@@ -168,14 +168,14 @@ test('client rule set override: premium clients have the deconversion fee waived
   if (g.prepared?.kind !== 'rules') return;
   assert.equal(g.prepared.result.ruleSet, 'termination-fees-premium');
   assert.equal(g.prepared.result.outputs.baseFeeUsd, 0);
-  workCase(app, kase.id);
+  await workCase(app, kase.id);
   assert.match(app.email.list().find((m) => m.subject.startsWith('Confirmation of plan termination'))!.body, /Deconversion fee: \$0\n/);
 });
 
-test('contact change to a free-mail address passes validation with a fraud warning', () => {
+test('contact change to a free-mail address passes validation with a fraud warning', async () => {
   const app = testApp();
-  const { plan } = installPlan(app);
-  const { tasks } = app.cases.submitIntake(
+  const { plan } = await installPlan(app);
+  const { tasks } = await app.cases.submitIntake(
     { caseType: 'MAINTENANCE_CONTACT', channel: 'DIGITAL', planId: plan.id, data: { contact: { role: 'PLAN_ADMINISTRATOR', name: 'J', email: 'j@freemail.example' } } },
     'portal',
   );

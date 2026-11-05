@@ -33,23 +33,23 @@ function openStep(app: App, caseId: string, stepId: string) {
   return app.cases.tasksFor(caseId).find((t) => t.stepId === stepId)!;
 }
 
-function readyFeeDisclosure(app: App) {
-  const { case: kase } = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } }, 'portal');
-  app.cases.completeTask(openStep(app, kase.id, 'review-fund-lineup').id, 'u_sam');
+async function readyFeeDisclosure(app: App) {
+  const { case: kase } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } }, 'portal');
+  await app.cases.completeTask(openStep(app, kase.id, 'review-fund-lineup').id, 'u_sam');
   return { kase, task: openStep(app, kase.id, 'fee-disclosure') };
 }
 
 test('AI assist is off without a model and says why', async () => {
   const app = testApp();
   assert.equal(app.ai.enabled, false);
-  const { task } = readyFeeDisclosure(app);
+  const { task } = await readyFeeDisclosure(app);
   await assert.rejects(app.ai.assist(task.id, task.assigneeId!), AiError);
 });
 
 test('prompt carries guidance, case data and required facts in separate data blocks', async () => {
   const fake = fakeModel(rewriteFromPrompt);
   const app = testApp(fake.call);
-  const { task } = readyFeeDisclosure(app);
+  const { task } = await readyFeeDisclosure(app);
   await app.ai.assist(task.id, task.assigneeId!);
   const user = fake.calls[0];
   assert.match(user, /<task>[\s\S]*408\(b\)\(2\)[\s\S]*<\/task>/);
@@ -60,7 +60,7 @@ test('prompt carries guidance, case data and required facts in separate data blo
 test('AI email draft keeps facts, is cached, and refreshes when the case changes', async () => {
   const fake = fakeModel(rewriteFromPrompt);
   const app = testApp(fake.call);
-  const { kase, task } = readyFeeDisclosure(app);
+  const { kase, task } = await readyFeeDisclosure(app);
 
   const a1 = await app.ai.assist(task.id, task.assigneeId!);
   assert.ok(a1.emailDraft);
@@ -88,10 +88,10 @@ test('AI draft that drops a required fact is flagged and cannot be sent', async 
     return out;
   });
   const app = testApp(fake.call);
-  const { task } = readyFeeDisclosure(app);
+  const { task } = await readyFeeDisclosure(app);
   const a = await app.ai.assist(task.id, task.assigneeId!);
   assert.deepEqual(a.emailDraft!.missingFacts, ['2500']);
-  assert.throws(
+  await assert.rejects(
     () => app.cases.completeTask(task.id, task.assigneeId!, { edits: { subject: a.emailDraft!.subject, body: a.emailDraft!.body }, draftSource: 'ai' }),
     /missing required facts/,
   );
@@ -100,7 +100,7 @@ test('AI draft that drops a required fact is flagged and cannot be sent', async 
 test('non-email steps never get an email draft, even if the model returns one', async () => {
   const fake = fakeModel(rewriteFromPrompt);
   const app = testApp(fake.call);
-  const { kase } = readyFeeDisclosure(app);
+  const { kase } = await readyFeeDisclosure(app);
   const verify = openStep(app, kase.id, 'verify-sponsor');
   const a = await app.ai.assist(verify.id, verify.assigneeId!);
   assert.equal(a.emailDraft, null);
@@ -109,9 +109,9 @@ test('non-email steps never get an email draft, even if the model returns one', 
 test('sending Claude\'s draft records the source and edits are measured against it', async () => {
   const fake = fakeModel(rewriteFromPrompt);
   const app = testApp(fake.call);
-  const { task } = readyFeeDisclosure(app);
+  const { task } = await readyFeeDisclosure(app);
   const a = await app.ai.assist(task.id, task.assigneeId!);
-  const done = app.cases.completeTask(task.id, task.assigneeId!, {
+  const done = await app.cases.completeTask(task.id, task.assigneeId!, {
     edits: { subject: a.emailDraft!.subject, body: a.emailDraft!.body },
     draftSource: 'ai',
   });

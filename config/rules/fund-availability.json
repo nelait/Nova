@@ -1,0 +1,39 @@
+{
+  "id": "fund-availability",
+  "version": 1,
+  "name": "Fund availability checks",
+  "description": "Checks the fund catalog's answer (from the 'fetch-fund-data' integration step) before the investment review.",
+  "outputs": [
+    { "name": "checked", "label": "Funds checked", "expr": "len(steps['fetch-fund-data'].data.funds)", "format": "number" },
+    { "name": "unknown", "label": "Not in catalog", "expr": "join(pluck(where(steps['fetch-fund-data'].data.funds, 'found', false), 'ticker'))" },
+    { "name": "unavailable", "label": "Closed or restricted", "expr": "join(pluck(where(where(steps['fetch-fund-data'].data.funds, 'found', true), 'available', false), 'ticker'))" },
+    { "name": "catalogDate", "label": "Catalog as of", "expr": "steps['fetch-fund-data'].data.asOf", "format": "date" }
+  ],
+  "rules": [
+    { "id": "catalog-answered", "assert": "outputs.checked == len(plan.details.funds)", "message": "Fund catalog returned {{outputs.checked}} results for {{len(plan.details.funds)}} funds" },
+    { "id": "all-known", "assert": "outputs.unknown == ''", "message": "Fund catalog does not recognise: {{outputs.unknown}}" },
+    {
+      "id": "all-available",
+      "assert": "outputs.unavailable == ''",
+      "message": "Not available on the platform: {{join(pluck(where(where(steps['fetch-fund-data'].data.funds, 'found', true), 'available', false), 'restriction'), '; ')}} ({{outputs.unavailable}})"
+    }
+  ],
+  "tests": [
+    {
+      "name": "all funds available",
+      "context": {
+        "plan": { "details": { "funds": [{ "ticker": "VFIAX" }, { "ticker": "VTTSX" }] } },
+        "steps": { "fetch-fund-data": { "data": { "asOf": "2026-11-01", "funds": [{ "ticker": "VFIAX", "found": true, "available": true }, { "ticker": "VTTSX", "found": true, "available": true }] } } }
+      },
+      "expect": { "passed": true, "failing": [], "outputs": { "checked": 2, "unknown": "", "unavailable": "" } }
+    },
+    {
+      "name": "closed and unknown funds fail",
+      "context": {
+        "plan": { "details": { "funds": [{ "ticker": "XCLSX" }, { "ticker": "ZZZZZ" }] } },
+        "steps": { "fetch-fund-data": { "data": { "funds": [{ "ticker": "XCLSX", "found": true, "available": false, "restriction": "Closed to new plans" }, { "ticker": "ZZZZZ", "found": false, "available": false }] } } }
+      },
+      "expect": { "passed": false, "failing": ["all-known", "all-available"], "outputs": { "unknown": "ZZZZZ", "unavailable": "XCLSX" } }
+    }
+  ]
+}

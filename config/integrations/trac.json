@@ -1,0 +1,68 @@
+{
+  "id": "trac",
+  "name": "TRAC recordkeeper",
+  "description": "System of record for installed plans. Set TRAC_BASE_URL and TRAC_API_KEY to use the real API; unset, the built-in mock is used.",
+  "baseUrl": "${TRAC_BASE_URL:-mock://trac}",
+  "auth": { "type": "apiKey", "header": "X-API-Key", "secretEnv": "TRAC_API_KEY" },
+  "timeoutMs": 10000,
+  "retry": { "attempts": 3, "backoffMs": 250, "onStatus": [429, 502, 503, 504] },
+  "idempotencyHeader": "Idempotency-Key",
+  "healthCheck": "health",
+  "operations": {
+    "health": { "method": "GET", "path": "/health" },
+    "listPlans": {
+      "description": "All plans on the recordkeeper",
+      "method": "GET",
+      "path": "/plans",
+      "response": "response.plans"
+    },
+    "getPlan": {
+      "description": "Current plan record, mapped to the hub's field names",
+      "method": "GET",
+      "path": "/plans/{{plan.tracPlanId}}",
+      "response": {
+        "status": "response.status",
+        "version": "response.version",
+        "contacts": "response.contacts",
+        "funds": "response.funds",
+        "fees": "response.fees",
+        "participantCount": "response.participants",
+        "planAssetsUsd": "response.assetsUsd"
+      }
+    },
+    "installPlan": {
+      "description": "Create the plan on the recordkeeper (installation complete)",
+      "method": "POST",
+      "path": "/plans",
+      "idempotent": true,
+      "body": {
+        "externalRef": "=plan.id",
+        "sponsor": { "name": "=plan.details.sponsorName", "ein": "=plan.details.ein" },
+        "planType": "=plan.details.planType",
+        "effectiveDate": "=plan.details.effectiveDate",
+        "participants": "=plan.details.employeeCount",
+        "assetsUsd": "=coalesce(plan.details.planAssetsUsd, 0)",
+        "contacts": "=plan.details.contacts",
+        "funds": "=plan.details.funds",
+        "fees": "=plan.details.fees"
+      },
+      "response": { "tracPlanId": "response.id", "version": "response.version" }
+    },
+    "updatePlan": {
+      "description": "Change contacts, funds or fees",
+      "method": "PATCH",
+      "path": "/plans/{{plan.tracPlanId}}",
+      "idempotent": true,
+      "body": "=input",
+      "response": { "version": "response.version" }
+    },
+    "terminatePlan": {
+      "description": "Mark the plan terminated with its successor provider",
+      "method": "POST",
+      "path": "/plans/{{plan.tracPlanId}}/terminate",
+      "idempotent": true,
+      "body": { "effectiveDate": "=request.effectiveDate", "successorProvider": "=request.successorProvider" },
+      "response": { "status": "response.status", "version": "response.version" }
+    }
+  }
+}

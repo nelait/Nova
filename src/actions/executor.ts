@@ -1,9 +1,10 @@
 import type { Case, Contact, FeeSchedule, Fund, Plan, Task } from '../domain/types.ts';
 import { getPath, newId, render } from '../domain/util.ts';
 import type { KnowledgeBase } from '../knowledge/knowledgeBase.ts';
-import type { RuleResult } from '../rules/ruleEngine.ts';
-import type { RecordkeeperAdapter } from '../integrations/recordkeeper.ts';
+import { STEP_CONDITION_ROOTS, type RuleResult } from '../rules/ruleEngine.ts';
 import type { EmailGateway } from '../integrations/email.ts';
+import type { IntegrationClient } from '../integrations/client.ts';
+import { compileBody } from '../integrations/registry.ts';
 
 export interface ActionContext {
   task: Task;
@@ -42,6 +43,17 @@ export type PreparedAction =
       requiredFacts: string[];
     }
   | { kind: 'system-update'; target: string; operation: string; payload: unknown }
+  | {
+      kind: 'integration';
+      system: string;
+      systemName: string;
+      operation: string;
+      description?: string;
+      method: string;
+      /** Reads are safe to repeat; writes change the external system. */
+      writes: boolean;
+      input: unknown;
+    }
   | { kind: 'manual' };
 
 export interface Edits {
@@ -64,19 +76,39 @@ export class ActionError extends Error {
 }
 
 /**
- * Action execution / integration hub. `prepare` is side-effect free (it powers
- * guided actions and human review); `execute` performs the side effects through
- * the integration ports.
+ * Action execution. `prepare` is side-effect free (it powers guided actions and
+ * human review); `execute` performs the side effects. Every external call goes
+ * through the configured integrations (config/integrations), including TRAC.
  */
 export class ActionExecutor {
   private kb: KnowledgeBase;
-  private rk: RecordkeeperAdapter;
+  private integrations: IntegrationClient;
   private email: EmailGateway;
 
-  constructor(kb: KnowledgeBase, rk: RecordkeeperAdapter, email: EmailGateway) {
+  constructor(kb: KnowledgeBase, integrations: IntegrationClient, email: EmailGateway) {
     this.kb = kb;
-    this.rk = rk;
+    this.integrations = integrations;
     this.email = email;
+  }
+
+  private get tracName(): string {
+    return this.kb.integrations.system('trac').def.name;
+  }
+
+  /** Call a configured integration on behalf of a step. */
+  private call(ctx: ActionContext, system: string, operation: string, input?: unknown) {
+    return this.integrations.call(system, operation, {
+      context: ruleContext(ctx),
+      input,
+      idempotencyKey: `${ctx.kase.id}:${ctx.task.stepId}`,
+      caseId: ctx.kase.id,
+      taskId: ctx.task.id,
+      actor: ctx.actor,
+    });
+  }
+
+  private stepInput(ctx: ActionContext): unknown {
+    return compileBody(ctx.task.action.params?.input ?? {}, STEP_CONDITION_ROOTS)(ruleContext(ctx));
   }
 
   prepare(ctx: ActionContext): PreparedAction {
@@ -87,30 +119,41 @@ export class ActionExecutor {
         const id = this.kb.ruleSetFor(String(p.ruleSet), kase.clientId);
         return { kind: 'rules', result: this.kb.rules.evaluate(id, ruleContext(ctx)) };
       }
+      case 'integration.call': {
+        const sys = this.kb.integrations.system(String(p.system));
+        const op = this.kb.integrations.operation(String(p.system), String(p.operation));
+        let input: unknown;
+        try {
+          input = this.stepInput(ctx);
+        } catch (e) {
+          input = { error: (e as Error).message };
+        }
+        return { kind: 'integration', system: sys.def.id, systemName: sys.def.name, operation: op.name, description: op.def.description, method: op.def.method, writes: op.def.method !== 'GET', input };
+      }
       case 'email.send':
         return this.prepareEmail(ctx);
       case 'contacts.upsert':
         return {
           kind: 'system-update',
-          target: plan.tracPlanId ? this.rk.name : 'Plan hub',
+          target: plan.tracPlanId ? this.tracName : 'Plan hub',
           operation: 'upsert contacts',
           payload: p.source === 'request' ? [kase.request.contact] : plan.details.contacts,
         };
       case 'funds.apply':
         return {
           kind: 'system-update',
-          target: p.source === 'request' ? this.rk.name : 'Plan hub',
+          target: p.source === 'request' ? this.tracName : 'Plan hub',
           operation: 'set fund lineup',
           payload: p.source === 'request' ? kase.request.funds : plan.details.funds,
         };
       case 'fees.apply':
-        return { kind: 'system-update', target: this.rk.name, operation: 'set fee schedule', payload: kase.request.fees };
+        return { kind: 'system-update', target: this.tracName, operation: 'set fee schedule', payload: kase.request.fees };
       case 'trac.installPlan':
-        return { kind: 'system-update', target: this.rk.name, operation: 'install plan', payload: plan.details };
+        return { kind: 'system-update', target: this.tracName, operation: 'install plan', payload: plan.details };
       case 'trac.terminatePlan':
         return {
           kind: 'system-update',
-          target: this.rk.name,
+          target: this.tracName,
           operation: 'terminate plan',
           payload: { tracPlanId: plan.tracPlanId, effectiveDate: kase.request.effectiveDate, successorProvider: kase.request.successorProvider },
         };
@@ -119,9 +162,8 @@ export class ActionExecutor {
     }
   }
 
-  execute(ctx: ActionContext, edits?: Edits): ExecutionOutcome {
+  async execute(ctx: ActionContext, edits?: Edits): Promise<ExecutionOutcome> {
     const { task, kase, plan } = ctx;
-    const key = `${kase.id}:${task.stepId}`;
     const p = task.action.params ?? {};
     const prepared = this.prepare(ctx);
 
@@ -131,6 +173,11 @@ export class ActionExecutor {
         const errors = r.issues.filter((i) => i.severity === 'error').map((i) => i.message);
         if (!r.passed) throw new ActionError(`Validation failed: ${errors.length} issue(s)`, errors);
         return { result: r };
+      }
+
+      case 'integration.call': {
+        const r = await this.call(ctx, String(p.system), String(p.operation), this.stepInput(ctx));
+        return { result: { system: p.system, operation: p.operation, data: r.data, status: r.status, attempts: r.attempts, durationMs: r.durationMs, callId: r.callId } };
       }
 
       case 'email.send': {
@@ -163,36 +210,34 @@ export class ActionExecutor {
         const previous = plan.details.contacts.find((c) => c.role === contact.role);
         const contacts = [...plan.details.contacts.filter((c) => c.role !== contact.role), contact];
         const next = { ...plan, details: { ...plan.details, contacts } };
-        if (plan.tracPlanId) this.rk.updatePlan(plan.tracPlanId, { contacts }, key);
+        if (plan.tracPlanId) await this.call(ctx, 'trac', 'updatePlan', { contacts });
         return { result: { previous: previous ?? null, current: contact }, plan: next };
       }
 
       case 'funds.apply': {
         if (p.source !== 'request') return { result: { approvedFunds: plan.details.funds.length } };
         const funds = kase.request.funds as Fund[];
-        if (plan.tracPlanId) this.rk.updatePlan(plan.tracPlanId, { funds }, key);
+        if (plan.tracPlanId) await this.call(ctx, 'trac', 'updatePlan', { funds });
         return { result: { funds: funds.length }, plan: { ...plan, details: { ...plan.details, funds } } };
       }
 
       case 'fees.apply': {
         const fees = kase.request.fees as FeeSchedule;
-        if (plan.tracPlanId) this.rk.updatePlan(plan.tracPlanId, { fees }, key);
+        if (plan.tracPlanId) await this.call(ctx, 'trac', 'updatePlan', { fees });
         return { result: { fees }, plan: { ...plan, details: { ...plan.details, fees } } };
       }
 
       case 'trac.installPlan': {
-        const rk = this.rk.installPlan(plan, key);
-        return { result: { tracPlanId: rk.id, version: rk.version }, plan: { ...plan, tracPlanId: rk.id } };
+        const r = await this.call(ctx, 'trac', 'installPlan');
+        const out = r.data as { tracPlanId?: string; version?: number };
+        if (!out?.tracPlanId) throw new ActionError('TRAC did not return a plan id');
+        return { result: { tracPlanId: out.tracPlanId, version: out.version }, plan: { ...plan, tracPlanId: out.tracPlanId } };
       }
 
       case 'trac.terminatePlan': {
         if (!plan.tracPlanId) throw new ActionError('Plan has no recordkeeper id');
-        const rk = this.rk.terminatePlan(
-          plan.tracPlanId,
-          { effectiveDate: String(kase.request.effectiveDate), successorProvider: String(kase.request.successorProvider) },
-          key,
-        );
-        return { result: { tracPlanId: rk.id, status: rk.status } };
+        const r = await this.call(ctx, 'trac', 'terminatePlan');
+        return { result: { tracPlanId: plan.tracPlanId, ...(r.data as object) } };
       }
 
       default:

@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installPlan, sampleDetails, testApp, workCase } from './helpers.ts';
 
-test('installation: auto steps run, human steps route by skill, plan lands on TRAC', () => {
+test('installation: auto steps run, human steps route by skill, plan lands on TRAC', async () => {
   const app = testApp();
-  const { case: kase, tasks } = app.cases.submitIntake(
+  const { case: kase, tasks } = await app.cases.submitIntake(
     { caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } },
     'portal',
   );
@@ -23,14 +23,14 @@ test('installation: auto steps run, human steps route by skill, plan lands on TR
   assert.equal(g.prepared?.kind, 'system-update');
   assert.ok(g.regulatoryRef?.includes('QDIA'));
 
-  workCase(app, kase.id);
+  await workCase(app, kase.id);
 
   const done = app.repos.cases.require(kase.id);
   assert.equal(done.status, 'COMPLETED');
   const plan = app.repos.plans.require(kase.planId);
   assert.equal(plan.status, 'ACTIVE');
   assert.match(plan.tracPlanId!, /^TRAC-/);
-  assert.equal(app.trac.getPlan(plan.tracPlanId!).sponsorName, 'Acme Robotics Inc.');
+  assert.equal(app.trac.getPlan(plan.tracPlanId!).sponsor.name, 'Acme Robotics Inc.');
 
   const mails = app.email.list();
   assert.equal(mails.length, 2);
@@ -40,19 +40,19 @@ test('installation: auto steps run, human steps route by skill, plan lands on TR
   assert.ok(!welcome.body.includes('[MISSING'));
 });
 
-test('ties go to the more proficient user; level-gated steps skip trainees', () => {
+test('ties go to the more proficient user; level-gated steps skip trainees', async () => {
   const app = testApp();
-  const { case: kase } = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'MANUAL', data: { details: sampleDetails() } }, 'u_priya');
-  workCase(app, kase.id);
+  const { case: kase } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'MANUAL', data: { details: sampleDetails() } }, 'u_priya');
+  await workCase(app, kase.id);
   const t = Object.fromEntries(app.cases.tasksFor(kase.id).map((t) => [t.stepId, t]));
   assert.equal(t['welcome-email'].assigneeId, 'u_priya'); // L3 beats L1 at equal load
   assert.equal(t['trac-install'].assigneeId, 'u_priya'); // marcus is L1, step needs L2
   assert.equal(t['verify-sponsor'].assigneeId, 'u_elena'); // COMPLIANCE L3 over sam's L1
 });
 
-test('bad onboarding data becomes an exception for a person, who fixes and retries', () => {
+test('bad onboarding data becomes an exception for a person, who fixes and retries', async () => {
   const app = testApp();
-  const { case: kase, tasks } = app.cases.submitIntake(
+  const { case: kase, tasks } = await app.cases.submitIntake(
     { caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails({ ein: '123', funds: [{ ticker: 'VFIAX', name: 'S&P 500' }] }) } },
     'portal',
   );
@@ -65,15 +65,15 @@ test('bad onboarding data becomes an exception for a person, who fixes and retri
   assert.ok(app.cases.tasksFor(kase.id).filter((t) => t.stepId !== 'validate-intake').every((t) => t.status === 'BLOCKED'));
 
   // Retry without fixing fails again.
-  assert.throws(() => app.cases.completeTask(v.id, v.assigneeId!), /Validation failed/);
+  await assert.rejects(() => app.cases.completeTask(v.id, v.assigneeId!), /Validation failed/);
 
   app.cases.updatePlanDetails(kase.planId, { ein: '12-3456789', funds: sampleDetails().funds }, v.assigneeId!);
-  const fixed = app.cases.completeTask(v.id, v.assigneeId!);
+  const fixed = await app.cases.completeTask(v.id, v.assigneeId!);
   assert.equal(fixed.status, 'DONE');
   assert.equal(app.cases.tasksFor(kase.id).find((t) => t.stepId === 'setup-contacts')!.status, 'DONE');
 });
 
-test('paper channel: OCR text is parsed into the same plan structure', () => {
+test('paper channel: OCR text is parsed into the same plan structure', async () => {
   const app = testApp();
   const text = [
     'Sponsor Name: Bluebird Bakery LLC',
@@ -85,7 +85,7 @@ test('paper channel: OCR text is parsed into the same plan structure', () => {
     'Fund: FXAIX | Fidelity 500 Index',
     'Fund: FDEWX | Fidelity Freedom 2055 | QDIA',
   ].join('\n');
-  const { case: kase, tasks } = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'PAPER', documentText: text }, 'mailroom');
+  const { case: kase, tasks } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'PAPER', documentText: text }, 'mailroom');
   const plan = app.repos.plans.require(kase.planId);
   assert.equal(plan.details.planType, '401K');
   assert.equal(plan.details.employeeCount, 1200);
@@ -93,10 +93,10 @@ test('paper channel: OCR text is parsed into the same plan structure', () => {
   assert.equal(tasks.find((t) => t.stepId === 'validate-intake')!.status, 'DONE');
 });
 
-test('maintenance: contact change reads from TRAC, updates TRAC, notifies old and new contact', () => {
+test('maintenance: contact change reads from TRAC, updates TRAC, notifies old and new contact', async () => {
   const app = testApp();
-  const { plan } = installPlan(app);
-  const { case: kase, tasks } = app.cases.submitIntake(
+  const { plan } = await installPlan(app);
+  const { case: kase, tasks } = await app.cases.submitIntake(
     {
       caseType: 'MAINTENANCE_CONTACT',
       channel: 'DIGITAL',
@@ -106,7 +106,7 @@ test('maintenance: contact change reads from TRAC, updates TRAC, notifies old an
     'portal',
   );
   assert.equal(tasks.find((t) => t.stepId === 'verify-authority')!.assigneeId, 'u_elena');
-  workCase(app, kase.id);
+  await workCase(app, kase.id);
   assert.equal(app.repos.cases.require(kase.id).status, 'COMPLETED');
   const rk = app.trac.getPlan(plan.tracPlanId!);
   assert.equal(rk.contacts.find((c) => c.role === 'PLAN_ADMINISTRATOR')!.email, 'omar@acme.example');
@@ -116,29 +116,29 @@ test('maintenance: contact change reads from TRAC, updates TRAC, notifies old an
   assert.deepEqual(confirm.cc, ['jane.doe@acme.example']);
 });
 
-test('maintenance requests are rejected for plans not yet on the recordkeeper', () => {
+test('maintenance requests are rejected for plans not yet on the recordkeeper', async () => {
   const app = testApp();
-  const { case: kase } = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } }, 'portal');
-  assert.throws(
+  const { case: kase } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', data: { details: sampleDetails() } }, 'portal');
+  await assert.rejects(
     () => app.cases.submitIntake({ caseType: 'MAINTENANCE_FEES', channel: 'DIGITAL', planId: kase.planId, data: {} }, 'portal'),
     /requires an installed, active plan/,
   );
 });
 
-test('fund change too close to effective date fails validation (404(c) notice window)', () => {
+test('fund change too close to effective date fails validation (404(c) notice window)', async () => {
   const app = testApp();
-  const { plan } = installPlan(app);
-  const { tasks } = app.cases.submitIntake(
+  const { plan } = await installPlan(app);
+  const { tasks } = await app.cases.submitIntake(
     { caseType: 'MAINTENANCE_FUNDS', channel: 'DIGITAL', planId: plan.id, data: { effectiveDate: '2026-11-20', funds: sampleDetails().funds } },
     'portal',
   );
   assert.match(tasks.find((t) => t.stepId === 'validate-request')!.exception!, /less than 30 days/);
 });
 
-test('termination: fees calculated, notices sent, plan terminated on TRAC', () => {
+test('termination: fees calculated, notices sent, plan terminated on TRAC', async () => {
   const app = testApp();
-  const { plan } = installPlan(app);
-  const { case: kase } = app.cases.submitIntake(
+  const { plan } = await installPlan(app);
+  const { case: kase } = await app.cases.submitIntake(
     {
       caseType: 'TERMINATION',
       channel: 'DIGITAL',
@@ -163,7 +163,7 @@ test('termination: fees calculated, notices sent, plan terminated on TRAC', () =
     assert.equal(o.totalUsd, 4916.44);
   }
 
-  workCase(app, kase.id);
+  await workCase(app, kase.id);
   assert.equal(app.repos.cases.require(kase.id).status, 'COMPLETED');
   assert.equal(app.repos.plans.require(plan.id).status, 'TERMINATED');
   assert.equal(app.trac.getPlan(plan.tracPlanId!).status, 'TERMINATED');
@@ -171,10 +171,10 @@ test('termination: fees calculated, notices sent, plan terminated on TRAC', () =
   assert.match(confirm.body, /Total: \$4916\.44/);
 });
 
-test('cancelling a termination returns the plan to ACTIVE', () => {
+test('cancelling a termination returns the plan to ACTIVE', async () => {
   const app = testApp();
-  const { plan } = installPlan(app);
-  const { case: kase } = app.cases.submitIntake(
+  const { plan } = await installPlan(app);
+  const { case: kase } = await app.cases.submitIntake(
     { caseType: 'TERMINATION', channel: 'MANUAL', planId: plan.id, data: { reason: 'x', successorProvider: 'y', effectiveDate: '2027-03-01' } },
     'u_dana',
   );

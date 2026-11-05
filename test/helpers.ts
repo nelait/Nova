@@ -6,7 +6,8 @@ export const NOW = new Date('2026-11-05T15:00:00Z');
 
 export function testApp(aiModel: ModelCall | null = null): App & { tick: (hours: number) => void } {
   let now = NOW.getTime();
-  const app = createApp({ dbPath: ':memory:', seedUsers: true, clock: { now: () => new Date(now) }, aiModel });
+  // Retries don't wait in tests; integrations use the built-in mock systems.
+  const app = createApp({ dbPath: ':memory:', seedUsers: true, clock: { now: () => new Date(now) }, aiModel, env: {}, sleep: async () => {} });
   return Object.assign(app, { tick: (h: number) => void (now += h * 3600_000) });
 }
 
@@ -35,11 +36,11 @@ export function sampleDetails(overrides: Partial<PlanDetails> = {}): PlanDetails
 
 /** Complete every open human task in the case by its assignee until nothing is left. */
 type Draft = { subject: string; body: string };
-export function workCase(
+export async function workCase(
   app: App,
   caseId: string,
   opts: { edits?: (stepId: string, draft: Draft | undefined) => Partial<Draft> | undefined } = {},
-): void {
+): Promise<void> {
   for (let i = 0; i < 50; i++) {
     const open = app.cases.tasksFor(caseId).filter((t) => (t.status === 'READY' || t.status === 'IN_PROGRESS') && t.assigneeId);
     if (open.length === 0) return;
@@ -47,14 +48,14 @@ export function workCase(
       app.cases.startTask(t.id, t.assigneeId!);
       const prepared = app.guidance.forTask(app.cases.contextFor(t, t.assigneeId!)).prepared;
       const draft = prepared?.kind === 'email' ? { subject: prepared.subject, body: prepared.body } : undefined;
-      app.cases.completeTask(t.id, t.assigneeId!, { notes: 'ok', edits: opts.edits?.(t.stepId, draft) });
+      await app.cases.completeTask(t.id, t.assigneeId!, { notes: 'ok', edits: opts.edits?.(t.stepId, draft) });
     }
   }
   throw new Error('workCase did not converge');
 }
 
-export function installPlan(app: App, clientId = 'default', details = sampleDetails()) {
-  const { case: kase } = app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', clientId, data: { details } }, 'portal');
-  workCase(app, kase.id);
+export async function installPlan(app: App, clientId = 'default', details = sampleDetails()) {
+  const { case: kase } = await app.cases.submitIntake({ caseType: 'INSTALLATION', channel: 'DIGITAL', clientId, data: { details } }, 'portal');
+  await workCase(app, kase.id);
   return { kase: app.repos.cases.require(kase.id), plan: app.repos.plans.require(kase.planId) };
 }

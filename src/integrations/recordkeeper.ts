@@ -1,133 +1,133 @@
-import type { Contact, FeeSchedule, Fund, Plan } from '../domain/types.ts';
-import type { Clock } from '../domain/util.ts';
-import { Collection, NotFoundError } from '../store/db.ts';
 import type { DatabaseSync } from 'node:sqlite';
+import type { Contact, FeeSchedule, Fund } from '../domain/types.ts';
+import type { Clock } from '../domain/util.ts';
+import { Collection } from '../store/db.ts';
+import type { HttpResponse, MockHandler } from './client.ts';
 
-export interface RecordkeeperPlan {
-  id: string; // recordkeeper plan id
-  hubPlanId: string;
-  sponsorName: string;
-  ein: string;
+/**
+ * Mock TRAC recordkeeper, exposed as a REST API (see config/integrations/trac.json).
+ * It uses its own field names (sponsor.name, participants, assetsUsd) so the
+ * configured request/response mapping is exercised like it would be against the
+ * real system. Point TRAC_BASE_URL at the real API to switch.
+ */
+export interface TracPlan {
+  id: string;
+  externalRef: string;
+  sponsor: { name: string; ein: string };
   planType: string;
   effectiveDate: string;
   status: 'ACTIVE' | 'TERMINATED';
   contacts: Contact[];
   funds: Fund[];
   fees: FeeSchedule;
-  participantCount: number;
-  planAssetsUsd: number;
+  participants: number;
+  assetsUsd: number;
   terminatedEffective?: string;
   successorProvider?: string;
   version: number;
   updatedAt: string;
 }
 
-export type RecordkeeperPatch = Partial<Pick<RecordkeeperPlan, 'contacts' | 'funds' | 'fees'>>;
-
-/**
- * Port to the recordkeeping system of record (e.g. TRAC). Every write carries an
- * idempotency key (case id + step id) so a retried step never double-posts.
- */
-export interface RecordkeeperAdapter {
-  readonly name: string;
-  installPlan(plan: Plan, idempotencyKey: string): RecordkeeperPlan;
-  updatePlan(rkPlanId: string, patch: RecordkeeperPatch, idempotencyKey: string): RecordkeeperPlan;
-  terminatePlan(rkPlanId: string, info: { effectiveDate: string; successorProvider: string }, idempotencyKey: string): RecordkeeperPlan;
-  getPlan(rkPlanId: string): RecordkeeperPlan;
-  listPlans(): RecordkeeperPlan[];
-}
-
 interface IdempotencyRecord {
   id: string;
-  rkPlanId: string;
+  planId: string;
 }
 
-/** In-process stand-in for TRAC, persisted in the same SQLite file. */
-export class MockTracAdapter implements RecordkeeperAdapter {
-  readonly name = 'TRAC (mock)';
-  private plans: Collection<RecordkeeperPlan>;
+const json = (status: number, body: unknown): HttpResponse => ({ status, body: JSON.stringify(body) });
+
+export class MockTracStore {
+  private plans: Collection<TracPlan>;
   private keys: Collection<IdempotencyRecord>;
   private clock: Clock;
-  /** Test hook: make the next write fail with this message (simulates an outage). */
-  failNextWith?: string;
+  private failures = 0;
+  private failureStatus = 503;
 
   constructor(db: DatabaseSync, clock: Clock) {
-    this.plans = new Collection<RecordkeeperPlan>(db, 'trac_plans');
+    this.plans = new Collection<TracPlan>(db, 'trac_plans');
     this.keys = new Collection<IdempotencyRecord>(db, 'trac_idempotency');
     this.clock = clock;
   }
 
-  private guard(key: string): RecordkeeperPlan | undefined {
-    if (this.failNextWith) {
-      const msg = this.failNextWith;
-      this.failNextWith = undefined;
-      throw new Error(`TRAC unavailable: ${msg}`);
-    }
-    const prior = this.keys.get(key);
-    return prior ? this.plans.get(prior.rkPlanId) : undefined;
+  /** Simulate an outage: the next `count` requests fail with `status`. */
+  failNext(count: number, status = 503): void {
+    this.failures = count;
+    this.failureStatus = status;
   }
 
-  installPlan(plan: Plan, key: string): RecordkeeperPlan {
-    const replay = this.guard(key);
-    if (replay) return replay;
-    const existing = this.plans.find((p) => p.ein === plan.details.ein && p.status === 'ACTIVE');
-    if (existing.length) throw new Error(`TRAC rejected install: active plan ${existing[0].id} already exists for EIN ${plan.details.ein}`);
-    const rk: RecordkeeperPlan = {
-      id: `TRAC-${String(this.plans.all().length + 100001)}`,
-      hubPlanId: plan.id,
-      sponsorName: plan.details.sponsorName,
-      ein: plan.details.ein,
-      planType: plan.details.planType,
-      effectiveDate: plan.details.effectiveDate,
-      status: 'ACTIVE',
-      contacts: plan.details.contacts,
-      funds: plan.details.funds,
-      fees: plan.details.fees,
-      participantCount: plan.details.employeeCount,
-      planAssetsUsd: plan.details.planAssetsUsd ?? 0,
-      version: 1,
-      updatedAt: this.clock.now().toISOString(),
-    };
-    this.plans.insert(rk);
-    this.keys.insert({ id: key, rkPlanId: rk.id });
-    return rk;
+  getPlan(id: string): TracPlan {
+    const p = this.plans.get(id);
+    if (!p) throw new Error(`TRAC plan ${id} not found`);
+    return p;
   }
 
-  updatePlan(rkPlanId: string, patch: RecordkeeperPatch, key: string): RecordkeeperPlan {
-    const replay = this.guard(key);
-    if (replay) return replay;
-    const rk = this.getPlan(rkPlanId);
-    if (rk.status !== 'ACTIVE') throw new Error(`TRAC rejected update: plan ${rkPlanId} is ${rk.status}`);
-    const next = { ...rk, ...patch, version: rk.version + 1, updatedAt: this.clock.now().toISOString() };
-    this.plans.update(next);
-    this.keys.insert({ id: key, rkPlanId });
-    return next;
-  }
-
-  terminatePlan(rkPlanId: string, info: { effectiveDate: string; successorProvider: string }, key: string): RecordkeeperPlan {
-    const replay = this.guard(key);
-    if (replay) return replay;
-    const rk = this.getPlan(rkPlanId);
-    const next: RecordkeeperPlan = {
-      ...rk,
-      status: 'TERMINATED',
-      terminatedEffective: info.effectiveDate,
-      successorProvider: info.successorProvider,
-      version: rk.version + 1,
-      updatedAt: this.clock.now().toISOString(),
-    };
-    this.plans.update(next);
-    this.keys.insert({ id: key, rkPlanId });
-    return next;
-  }
-
-  getPlan(rkPlanId: string): RecordkeeperPlan {
-    const rk = this.plans.get(rkPlanId);
-    if (!rk) throw new NotFoundError(`TRAC plan ${rkPlanId} not found`);
-    return rk;
-  }
-
-  listPlans(): RecordkeeperPlan[] {
+  listPlans(): TracPlan[] {
     return this.plans.all();
   }
+
+  readonly handler: MockHandler = ({ method, path, headers, body }) => {
+    if (this.failures > 0) {
+      this.failures--;
+      return json(this.failureStatus, { error: 'Service temporarily unavailable' });
+    }
+    if (path === '/health') return json(200, { status: 'ok' });
+    if (!headers['x-api-key']) return json(401, { error: 'Missing API key' });
+
+    const now = this.clock.now().toISOString();
+    const b = (body ?? {}) as Record<string, unknown>;
+    const key = headers['idempotency-key'];
+    const replay = key ? this.keys.get(key) : undefined;
+    if (replay && method !== 'GET') return json(200, this.plans.get(replay.planId));
+    const remember = (planId: string) => key && this.keys.insert({ id: key, planId });
+
+    if (path === '/plans' && method === 'GET') return json(200, { plans: this.plans.all() });
+
+    if (path === '/plans' && method === 'POST') {
+      const sponsor = b.sponsor as TracPlan['sponsor'] | undefined;
+      if (!sponsor?.ein || !sponsor.name) return json(422, { error: 'sponsor.name and sponsor.ein are required' });
+      const dup = this.plans.find((p) => p.sponsor.ein === sponsor.ein && p.status === 'ACTIVE');
+      if (dup.length) return json(409, { error: `Active plan ${dup[0].id} already exists for EIN ${sponsor.ein}` });
+      const plan: TracPlan = {
+        id: `TRAC-${String(this.plans.all().length + 100001)}`,
+        externalRef: String(b.externalRef ?? ''),
+        sponsor,
+        planType: String(b.planType ?? ''),
+        effectiveDate: String(b.effectiveDate ?? ''),
+        status: 'ACTIVE',
+        contacts: (b.contacts ?? []) as Contact[],
+        funds: (b.funds ?? []) as Fund[],
+        fees: b.fees as FeeSchedule,
+        participants: Number(b.participants ?? 0),
+        assetsUsd: Number(b.assetsUsd ?? 0),
+        version: 1,
+        updatedAt: now,
+      };
+      this.plans.insert(plan);
+      remember(plan.id);
+      return json(201, plan);
+    }
+
+    const m = path.match(/^\/plans\/([^/]+)(\/terminate)?$/);
+    if (!m) return json(404, { error: `No route ${method} ${path}` });
+    const plan = this.plans.get(decodeURIComponent(m[1]));
+    if (!plan) return json(404, { error: `Plan ${m[1]} not found` });
+
+    if (!m[2] && method === 'GET') return json(200, plan);
+    if (plan.status !== 'ACTIVE') return json(409, { error: `Plan ${plan.id} is ${plan.status}` });
+
+    if (!m[2] && method === 'PATCH') {
+      const patch: Partial<TracPlan> = {};
+      for (const k of ['contacts', 'funds', 'fees'] as const) if (b[k] !== undefined) Object.assign(patch, { [k]: b[k] });
+      const next = { ...plan, ...patch, version: plan.version + 1, updatedAt: now };
+      this.plans.update(next);
+      remember(plan.id);
+      return json(200, next);
+    }
+    if (m[2] && method === 'POST') {
+      const next: TracPlan = { ...plan, status: 'TERMINATED', terminatedEffective: String(b.effectiveDate), successorProvider: String(b.successorProvider), version: plan.version + 1, updatedAt: now };
+      this.plans.update(next);
+      remember(plan.id);
+      return json(200, next);
+    }
+    return json(405, { error: `${method} not allowed on ${path}` });
+  };
 }

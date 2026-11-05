@@ -7,6 +7,7 @@ import { ActionError } from '../actions/executor.ts';
 import Anthropic from '@anthropic-ai/sdk';
 import { AiError } from '../ai/claudeAssist.ts';
 import { FUNCTIONS, RuleError } from '../rules/expression.ts';
+import { IntegrationError } from '../integrations/client.ts';
 
 type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string }) => unknown;
 
@@ -98,8 +99,37 @@ route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor }) => app.
 route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor }) => app.cases.reassign(params.id, actor, body.toUserId));
 
 // --- integrations & learning
-route('GET', '/api/trac/plans', ({ app }) => app.trac.listPlans());
-route('POST', '/api/trac/simulate-outage', ({ app, body }) => ((app.trac.failNextWith = body.message ?? 'simulated outage'), { armed: true }));
+// The Recordkeeper screen reads TRAC through its configured integration, like the engine does.
+route('GET', '/api/trac/plans', async ({ app, actor }) => (await app.integrations.call('trac', 'listPlans', { actor })).data);
+route('POST', '/api/trac/simulate-outage', ({ app, body }) => (app.trac.failNext(Number(body.requests ?? 10)), { armed: true }));
+
+// --- integrations (configured external systems)
+route('GET', '/api/integrations', ({ app }) =>
+  app.kb.integrations.list().map((s) => ({
+    id: s.def.id,
+    name: s.def.name,
+    description: s.def.description ?? '',
+    baseUrl: s.baseUrl,
+    mock: s.baseUrl.startsWith('mock://'),
+    auth: s.def.auth?.type ?? 'none',
+    secrets: app.integrations.secretStatus(s),
+    timeoutMs: s.def.timeoutMs ?? 10000,
+    retry: { attempts: s.def.retry?.attempts ?? 3, backoffMs: s.def.retry?.backoffMs ?? 250 },
+    healthCheck: s.def.healthCheck ?? null,
+    operations: [...s.operations.values()].map((o) => ({
+      name: o.name,
+      method: o.def.method,
+      path: o.def.path,
+      description: o.def.description ?? '',
+      idempotent: o.def.method === 'GET' || !!o.def.idempotent,
+      usedBy: app.kb.listPlaybooks().flatMap((p) =>
+        p.steps.filter((st) => st.action.type === 'integration.call' && st.action.params?.system === s.def.id && st.action.params?.operation === o.name).map((st) => `${p.caseType} / ${st.id}`),
+      ),
+    })),
+  })),
+);
+route('POST', '/api/integrations/:id/test', ({ app, params }) => app.integrations.test(params.id));
+route('GET', '/api/integrations/calls', ({ app, query }) => app.integrations.calls(Number(query.get('limit') ?? 50)));
 route('GET', '/api/outbox', ({ app }) => app.email.list());
 route('GET', '/api/insights', ({ app }) => app.insights());
 route('GET', '/api/audit', ({ app, query }) => app.repos.audit.all().reverse().slice(0, Number(query.get('limit') ?? 200)));
@@ -145,6 +175,7 @@ export function startServer(app: App, port: number, publicDir: string) {
         return send(res, 422, { error: (e as Error).message, issues: (e as ValidationError).issues ?? [] });
       }
       if (e instanceof AiError) return send(res, 503, { error: e.message });
+      if (e instanceof IntegrationError) return send(res, 502, { error: e.message });
       if (e instanceof Anthropic.RateLimitError) return send(res, 429, { error: 'Claude is rate limited; try again shortly' });
       if (e instanceof Anthropic.AuthenticationError) return send(res, 503, { error: 'Claude rejected the API credentials' });
       if (e instanceof Anthropic.APIConnectionError) return send(res, 503, { error: 'Could not reach Claude' });

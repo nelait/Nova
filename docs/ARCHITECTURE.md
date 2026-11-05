@@ -56,6 +56,7 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
 | 9 | Insights / learning loop | `src/learning/insights.ts` |
 | 10 | Claude assistance (optional) | `src/ai/claudeAssist.ts` |
 | 11 | Rules engine: decision tables, calculations, validations | `src/rules/`, `config/rules/` ([RULES.md](RULES.md)) |
+| 12 | Integration module: configured external systems | `src/integrations/`, `config/integrations/` ([INTEGRATIONS.md](INTEGRATIONS.md)) |
 
 ## Key design decisions
 
@@ -73,7 +74,7 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
 3. **`prepare()` vs `execute()`.** Every action can describe what it *will* do
    (the drafted email, the TRAC payload, the fee calculation) without side effects.
    That powers both guided actions and human review. `execute()` performs the side
-   effects through ports (`RecordkeeperAdapter`, `EmailGateway`).
+   effects through configured integrations (`IntegrationClient`) and the `EmailGateway`.
 
 4. **The recordkeeper is the source of truth after go-live.**
    - A maintenance or termination case first refreshes the hub's plan snapshot from TRAC.
@@ -121,6 +122,18 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
    to a person). Each rule set carries test cases that `npm test` runs. Clients
    can swap a rule set via `ruleSetOverrides`. See [RULES.md](RULES.md).
 
+9. **External systems are configuration, and TRAC is one of them.** Each system
+   (`config/integrations/`) declares its URL, auth (secrets by environment
+   variable name only), timeout, retry policy and operations, with request
+   bodies and response mappings written in the rules language. Steps call them
+   with `integration.call`, and the built-in TRAC actions use the same client. Only
+   idempotent operations are retried, and they carry an idempotency key. Failures
+   after retries become exceptions for a person. The call log records outcomes
+   and timing, never bodies or secrets. Built-in mocks behind `mock://` URLs keep
+   the demo and tests self-contained while exercising the same HTTP contract. The
+   engine is async, with work on each case serialized. See
+   [INTEGRATIONS.md](INTEGRATIONS.md).
+
 ## Task state machine
 
 ```
@@ -159,9 +172,9 @@ actual contract terms.
 | Prototype | Production |
 |---|---|
 | `node:sqlite` document store | Postgres with real tables (the services use only the `Collection` interface) |
-| `MockTracAdapter` | Real TRAC integration (API / file feed) behind `RecordkeeperAdapter`; add reconciliation |
+| `mock://trac` | Set `TRAC_BASE_URL` / `TRAC_API_KEY` for the real API; add reconciliation |
 | Outbox table | Mail service + template/document service (PDF notices) |
-| In-process `advance()` | Durable workflow engine or job queue (e.g. Temporal, or a DB-backed outbox), so AUTO steps retry with backoff |
+| In-process `advance()` with a lock per case | Durable workflow engine or job queue (e.g. Temporal, or a DB-backed outbox), so external calls don't hold requests open and survive restarts |
 | `x-user-id` header | OIDC/SAML login; authorization by role and skill |
 | Regex "OCR" parser | IDP/OCR service with per-field confidence and low-confidence review |
 | On-demand Claude assist | Build an eval set from real cases before changing the prompt or model; consider pre-generating assists when tasks become ready; add retrieval over policy documents for the knowledge base |

@@ -6,7 +6,7 @@ import { normalizeIntake, type IntakeSubmission } from '../intake/intake.ts';
 import { ActionError, ruleContext, type ActionContext, type ActionExecutor, type Edits } from '../actions/executor.ts';
 import { compile } from '../rules/expression.ts';
 import { STEP_CONDITION_ROOTS } from '../rules/ruleEngine.ts';
-import type { RecordkeeperAdapter } from '../integrations/recordkeeper.ts';
+import type { IntegrationClient } from '../integrations/client.ts';
 import { routeTask } from '../routing/skillRouter.ts';
 import type { UserDirectory } from '../users/userDirectory.ts';
 
@@ -26,8 +26,15 @@ export interface CompleteInput {
   draftSource?: 'template' | 'ai';
 }
 
-/** Rule results are large (outputs, trace); the audit log keeps a summary. The task keeps the full result. */
+/**
+ * Rule and integration results are large (outputs, trace, response data); the
+ * audit log keeps a summary. The task keeps the full result.
+ */
 function auditSummary(result: unknown): unknown {
+  if (result && typeof result === 'object' && 'callId' in result && 'system' in result) {
+    const r = result as { system: string; operation: string; status: number; attempts: number; callId: string };
+    return { call: `${r.system}.${r.operation}`, status: r.status, attempts: r.attempts, callId: r.callId };
+  }
   if (result && typeof result === 'object' && 'ruleSet' in result && 'issues' in result) {
     const r = result as { ruleSet: string; version: number; passed: boolean; issues: { ruleId: string; severity: string }[] };
     return { ruleSet: `${r.ruleSet}@v${r.version}`, passed: r.passed, issues: r.issues.map((i) => `${i.severity}:${i.ruleId}`) };
@@ -50,18 +57,35 @@ export class CaseService {
   private r: Repos;
   private kb: KnowledgeBase;
   private exec: ActionExecutor;
-  private rk: RecordkeeperAdapter;
+  private integrations: IntegrationClient;
   private users: UserDirectory;
   private clock: Clock;
   private aiDraftFor?: DraftLookup;
+  private locks = new Map<string, Promise<unknown>>();
 
-  constructor(r: Repos, kb: KnowledgeBase, exec: ActionExecutor, rk: RecordkeeperAdapter, users: UserDirectory, clock: Clock) {
+  constructor(r: Repos, kb: KnowledgeBase, exec: ActionExecutor, integrations: IntegrationClient, users: UserDirectory, clock: Clock) {
     this.r = r;
     this.kb = kb;
     this.exec = exec;
-    this.rk = rk;
+    this.integrations = integrations;
     this.users = users;
     this.clock = clock;
+  }
+
+  /**
+   * Steps can now wait on external systems, so two requests could interleave on
+   * one case. Work on a case runs one at a time.
+   */
+  private async withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(key) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => undefined);
+    this.locks.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      if (this.locks.get(key) === tail) this.locks.delete(key);
+    }
   }
 
   get repos(): Repos {
@@ -83,7 +107,7 @@ export class CaseService {
 
   // ---------------------------------------------------------------- intake
 
-  submitIntake(sub: IntakeSubmission, actor: string): { case: Case; tasks: Task[] } {
+  async submitIntake(sub: IntakeSubmission, actor: string): Promise<{ case: Case; tasks: Task[] }> {
     const n = normalizeIntake(sub);
     let plan: Plan;
 
@@ -108,7 +132,7 @@ export class CaseService {
         throw new ValidationError(`Plan has ${openCases.length} open case(s); finish or cancel them before terminating`);
       }
       // The recordkeeper is the system of record once a plan is live: refresh our snapshot first.
-      plan = this.refreshFromRecordkeeper(plan);
+      plan = await this.refreshFromRecordkeeper(plan, actor);
       if (n.caseType === 'TERMINATION') {
         plan = this.r.plans.update({ ...plan, status: 'TERMINATING', updatedAt: this.now() });
       }
@@ -147,13 +171,17 @@ export class CaseService {
         history: [{ at: this.now(), by: 'system', event: 'created' }],
       });
     }
-    this.advance(kase.id);
+    await this.advance(kase.id);
     return { case: this.r.cases.require(kase.id), tasks: this.tasksFor(kase.id) };
   }
 
-  refreshFromRecordkeeper(plan: Plan): Plan {
+  async refreshFromRecordkeeper(plan: Plan, actor = 'system'): Promise<Plan> {
     if (!plan.tracPlanId) return plan;
-    const rk = this.rk.getPlan(plan.tracPlanId);
+    const { data } = await this.integrations.call('trac', 'getPlan', {
+      context: { plan: { id: plan.id, tracPlanId: plan.tracPlanId, details: plan.details } },
+      actor,
+    });
+    const rk = data as { contacts: PlanDetails['contacts']; funds: PlanDetails['funds']; fees: PlanDetails['fees']; participantCount: number; planAssetsUsd: number };
     const details: PlanDetails = {
       ...plan.details,
       contacts: rk.contacts,
@@ -177,7 +205,11 @@ export class CaseService {
   // ---------------------------------------------------------------- engine
 
   /** Unblock tasks whose dependencies are done, run AUTO tasks, route human tasks, close the case. */
-  advance(caseId: string): void {
+  advance(caseId: string): Promise<void> {
+    return this.withLock(caseId, () => this.advanceUnlocked(caseId));
+  }
+
+  private async advanceUnlocked(caseId: string): Promise<void> {
     for (let guard = 0; guard < 100; guard++) {
       const tasks = this.tasksFor(caseId);
       const doneSteps = new Set(tasks.filter((t) => t.status === 'DONE' || t.status === 'SKIPPED').map((t) => t.stepId));
@@ -204,7 +236,7 @@ export class CaseService {
       }
 
       for (const t of this.tasksFor(caseId).filter((t) => t.status === 'READY' && t.mode === 'AUTO' && !t.exception)) {
-        this.runAuto(t);
+        await this.runAuto(t);
         progressed = true;
       }
       if (!progressed) break;
@@ -213,9 +245,9 @@ export class CaseService {
     this.checkCompletion(caseId);
   }
 
-  private runAuto(task: Task): void {
+  private async runAuto(task: Task): Promise<void> {
     try {
-      const outcome = this.exec.execute(this.contextFor(task, 'system'));
+      const outcome = await this.exec.execute(this.contextFor(task, 'system'));
       if (outcome.plan) this.r.plans.update({ ...outcome.plan, updatedAt: this.now() });
       this.save(task, { status: 'DONE', result: outcome.result, completedAt: this.now() }, 'system', 'auto-completed', auditSummary(outcome.result));
     } catch (e) {
@@ -287,7 +319,12 @@ export class CaseService {
   }
 
   /** Approve/execute a REVIEW step, confirm a MANUAL step, or resolve an exception. */
-  completeTask(taskId: string, userId: string, input: CompleteInput = {}): Task {
+  completeTask(taskId: string, userId: string, input: CompleteInput = {}): Promise<Task> {
+    const caseId = this.r.tasks.require(taskId).caseId;
+    return this.withLock(caseId, () => this.completeUnlocked(taskId, userId, input));
+  }
+
+  private async completeUnlocked(taskId: string, userId: string, input: CompleteInput): Promise<Task> {
     let t = this.r.tasks.require(taskId);
     this.requireOwner(t, userId);
     if (t.status === 'READY') t = this.startTask(taskId, userId);
@@ -300,7 +337,7 @@ export class CaseService {
       t = this.save(t, { status: 'DONE', completedAt: this.now(), result: { notes: input.notes ?? '' } }, userId, 'confirmed', { notes: input.notes });
     } else {
       try {
-        const outcome = this.exec.execute(this.contextFor(t, userId), input.edits);
+        const outcome = await this.exec.execute(this.contextFor(t, userId), input.edits);
         if (outcome.plan) this.r.plans.update({ ...outcome.plan, updatedAt: this.now() });
         let draftEdited = outcome.draftEdited;
         let draftSource: Task['draftSource'];
@@ -322,7 +359,7 @@ export class CaseService {
         throw e instanceof ActionError ? e : new ActionError((e as Error).message);
       }
     }
-    this.advance(t.caseId);
+    await this.advanceUnlocked(t.caseId);
     return this.r.tasks.require(taskId);
   }
 

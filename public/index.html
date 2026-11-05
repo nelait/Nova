@@ -91,7 +91,7 @@ async function api(path, opts = {}) {
 function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; t.style.background = bad ? 'var(--bad)' : ''; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), bad ? 7000 : 3000); }
 async function guarded(fn) { try { await fn(); } catch (e) { toast(e.message, true); } }
 
-const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', rules: 'Rules', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
+const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', rules: 'Rules', integrations: 'Integrations', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
 function renderTabs() { $('#tabs').innerHTML = Object.entries(TABS).map(([k, v]) => `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${v}</button>`).join(''); }
 $('#tabs').onclick = (e) => { const k = e.target.dataset.tab; if (k) { state.tab = k; renderTabs(); render(); } };
 $('#userSel').onchange = (e) => { state.user = e.target.value; state.selTask = null; try { localStorage.setItem('planops.user', state.user); } catch {} render(); };
@@ -142,6 +142,10 @@ async function renderTaskDetail(el, taskId) {
       <label>Body</label><textarea id="body" rows="14">${esc(p.body)}</textarea>`;
   } else if (p?.kind === 'system-update') {
     work = `<h3>Will ${esc(p.operation)} on ${esc(p.target)}</h3><pre>${esc(JSON.stringify(p.payload, null, 2))}</pre>`;
+  } else if (p?.kind === 'integration') {
+    work = `<h3>External call</h3><p><b>${esc(p.systemName)}</b> → <code>${esc(p.operation)}</code> <span class="chip">${esc(p.method)}</span><span class="chip ${p.writes ? 'MANUAL' : 'AUTO'}">${p.writes ? 'changes data' : 'reads data'}</span></p>
+      ${p.description ? `<p class="small muted">${esc(p.description)}</p>` : ''}<div class="small"><b>Input</b></div><pre>${esc(JSON.stringify(p.input, null, 2))}</pre>
+      <p class="small muted">Configured in <code>config/integrations/${esc(p.system)}.json</code>. Failed calls are retried per that system's policy; see the Integrations screen for the call log.</p>`;
   } else if (p?.kind === 'rules') {
     work = `<h3>Rules: ${esc(p.result.name)} <span class="muted">(${esc(p.result.ruleSet)} v${p.result.version})</span></h3>${renderRuleResult(p.result)}`;
   }
@@ -287,13 +291,13 @@ async function renderTeam(v) {
 // ---------------------------------------------------------------- trac / outbox / insights
 async function renderTrac(v) {
   const plans = await api('/trac/plans');
-  v.innerHTML = `<div class="panel"><h2>Recordkeeper (TRAC mock): system of record</h2>
-    <p class="small muted">Plans appear here only when the installation's final step succeeds. Maintenance and termination cases read from and write to these records.</p>
-    <div class="actions"><button class="btn secondary" id="outage">Simulate outage on next write</button></div>
+  v.innerHTML = `<div class="panel"><h2>Recordkeeper (TRAC): system of record</h2>
+    <p class="small muted">Read live through the <b>trac</b> integration (<code>listPlans</code>). Plans appear here only when an installation's final step succeeds. Maintenance and termination cases read from and write to these records.</p>
+    <div class="actions"><button class="btn secondary" id="outage">Simulate TRAC outage (next 10 requests)</button></div>
     <div class="scroll"><table><tr><th>TRAC id</th><th>Sponsor</th><th>Status</th><th>Version</th><th>Funds</th><th>Plan admin</th><th>Updated</th></tr>
-    ${plans.map((p) => `<tr><td>${p.id}</td><td>${esc(p.sponsorName)}<div class="small muted">${p.ein}</div></td><td><span class="chip ${p.status}">${p.status}</span>${p.successorProvider ? `<div class="small muted">→ ${esc(p.successorProvider)}</div>` : ''}</td><td>v${p.version}</td>
+    ${plans.map((p) => `<tr><td>${p.id}</td><td>${esc(p.sponsor?.name)}<div class="small muted">${esc(p.sponsor?.ein)}</div></td><td><span class="chip ${p.status}">${p.status}</span>${p.successorProvider ? `<div class="small muted">→ ${esc(p.successorProvider)}</div>` : ''}</td><td>v${p.version}</td>
       <td class="small">${p.funds.map((f) => esc(f.ticker) + (f.qdia ? '*' : '')).join(', ')}</td><td class="small">${esc(p.contacts.find((c) => c.role === 'PLAN_ADMINISTRATOR')?.email)}</td><td class="small">${fmtDate(p.updatedAt)}</td></tr>`).join('')}</table></div></div>`;
-  $('#outage').onclick = () => guarded(async () => { await api('/trac/simulate-outage', { method: 'POST', body: {} }); toast('Next TRAC write will fail'); });
+  $('#outage').onclick = () => guarded(async () => { await api('/trac/simulate-outage', { method: 'POST', body: {} }); toast('The next 10 TRAC requests will fail with 503'); });
 }
 async function renderOutbox(v) {
   const mails = await api('/outbox');
@@ -347,7 +351,35 @@ async function renderRules(v) {
   });
 }
 
-const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, rules: renderRules, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
+// ---------------------------------------------------------------- integrations
+async function renderIntegrations(v) {
+  const [systems, calls] = await Promise.all([api('/integrations'), api('/integrations/calls?limit=40')]);
+  v.innerHTML = `<div class="panel" style="margin-bottom:16px"><h2>External systems (${systems.length})</h2>
+    <p class="small muted">Defined in <code>config/integrations/*.json</code>: URL, authentication, timeouts, retries and the operations steps may call. Secrets come from environment variables and are never shown or logged.</p>
+    ${systems.map((s) => `<div class="item" style="cursor:default">
+      <div class="row" style="align-items:flex-start"><div style="flex:3"><b>${esc(s.name)}</b> <span class="muted small">${esc(s.id)}</span>
+        <div class="small muted">${esc(s.description)}</div></div>
+        <div style="flex:0 0 auto"><button class="btn secondary" data-test="${s.id}">Test connection</button></div></div>
+      <div class="small" style="margin-top:6px"><span class="chip ${s.mock ? 'MANUAL' : 'DONE'}">${s.mock ? 'built-in mock' : 'live'}</span><code>${esc(s.baseUrl)}</code></div>
+      <div class="small" style="margin-top:4px">Auth: <b>${esc(s.auth)}</b> ${s.secrets.map((x) => `<span class="chip ${x.set ? 'DONE' : 'exception'}">${esc(x.env)}: ${x.set ? (s.mock ? 'not needed (mock)' : 'set') : 'missing'}</span>`).join('')}
+        · timeout ${s.timeoutMs} ms · up to ${s.retry.attempts} attempts</div>
+      <div class="small" id="test-${s.id}"></div>
+      <div class="scroll" style="margin-top:6px"><table class="small"><tr><th>Operation</th><th>Request</th><th>Retry-safe</th><th>Used by</th></tr>
+        ${s.operations.map((o) => `<tr><td><b>${esc(o.name)}</b><div class="muted">${esc(o.description)}</div></td><td><span class="chip">${o.method}</span><code>${esc(o.path)}</code></td><td>${o.idempotent ? 'yes' : 'no'}</td><td>${o.usedBy.map(esc).join('<br>') || '<span class="muted">built-in actions</span>'}</td></tr>`).join('')}
+      </table></div></div>`).join('')}</div>
+    <div class="panel"><h2>Recent calls</h2><p class="small muted">Method, path, outcome and timing only. Request and response bodies are not stored because they can contain personal data.</p>
+    <div class="scroll"><table class="small"><tr><th>When</th><th>Call</th><th>Path</th><th>Status</th><th>Attempts</th><th>Time</th><th>For</th></tr>
+      ${calls.map((c) => `<tr><td>${fmtDate(c.at)}</td><td>${esc(c.system)}.${esc(c.operation)}</td><td><span class="chip">${c.method}</span><code>${esc(c.path)}</code></td>
+        <td><span class="chip ${c.ok ? 'DONE' : 'exception'}">${c.status ?? 'error'}</span>${c.error ? `<div style="color:var(--bad)">${esc(c.error)}</div>` : ''}</td><td>${c.attempts}</td><td>${c.durationMs} ms</td><td>${esc(c.actor || '')}${c.caseId ? `<div class="muted">${esc(c.caseId)}</div>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">No calls yet.</td></tr>'}
+    </table></div></div>`;
+  v.querySelectorAll('[data-test]').forEach((b) => (b.onclick = () => guarded(async () => {
+    const id = b.dataset.test; const out = $('#test-' + id); out.textContent = 'Testing…';
+    const r = await api(`/integrations/${id}/test`, { method: 'POST', body: {} });
+    out.innerHTML = `<div class="alert ${r.ok ? 'low' : 'bad'}">${r.ok ? 'Connected' : 'Failed'}: ${esc(r.message)}${r.durationMs !== undefined ? ` (${r.durationMs} ms)` : ''}</div>`;
+  })));
+}
+
+const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, rules: renderRules, integrations: renderIntegrations, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
 async function render() { const v = $('#view'); await guarded(() => VIEWS[state.tab](v)); loadUsers().catch(() => {}); }
 
 async function loadUsers() {

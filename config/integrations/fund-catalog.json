@@ -1,0 +1,21 @@
+{
+  "id": "fund-catalog",
+  "name": "Fund catalog",
+  "description": "Investment platform's catalog: whether each fund can be offered in a plan. Set FUND_CATALOG_URL (and an auth block, e.g. oauth2ClientCredentials) to use a real service.",
+  "baseUrl": "${FUND_CATALOG_URL:-mock://fund-catalog}",
+  "auth": { "type": "none" },
+  "timeoutMs": 5000,
+  "retry": { "attempts": 2, "backoffMs": 200 },
+  "healthCheck": "health",
+  "operations": {
+    "health": { "method": "GET", "path": "/health" },
+    "lookupFunds": {
+      "description": "Availability and share class for a list of tickers",
+      "method": "POST",
+      "path": "/v1/funds/lookup",
+      "idempotent": true,
+      "body": { "tickers": "=input.tickers" },
+      "response": { "funds": "response.results", "asOf": "response.asOf" }
+    }
+  }
+}
