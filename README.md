@@ -67,6 +67,11 @@ hidden; `AI_ASSIST=off` disables it even when credentials are present.
 ANTHROPIC_API_KEY=sk-ant-... npm start
 ```
 
+To try the fund-mapping AI agent against Claude on three scenarios (clear match,
+no reasonable match, and an instruction hidden in sponsor data), run
+`npm run try:agent` with the key set. It makes three live agent runs and prints
+each proposal with basic checks.
+
 Each "Ask Claude" makes one call to `claude-opus-5-5`. Results are stored per
 task and reused until the task's data changes, and every call is recorded in the
 audit trail with its token usage. Plan and contact data from the case is sent to
