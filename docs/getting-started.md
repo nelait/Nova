@@ -26,12 +26,12 @@ person sees only the work routed to them:
 
 | Person | Skills | What you'll find in their inbox |
 |---|---|---|
-| Priya Shah | Plan setup L3, Maintenance L2 | Welcome emails, recordkeeper installs |
+| Priya Shah | Plan setup L3, Maintenance L2 (admin) | Welcome emails, recordkeeper installs |
 | Marcus Lee | Plan setup L1, Maintenance L3 | An application with an invalid EIN |
-| Elena Garcia | Compliance L3 | Sponsor verification, fee disclosures |
+| Elena Garcia | Compliance L3 (supervisor) | Sponsor verification, fee disclosures; can cancel cases and reassign work |
 | Rafael Torres | Compliance L2 | Contact-change call-backs, disclosures |
 | Sam Okafor | Investments L3 | An AI-proposed fund mapping, a closed fund |
-| Dana Kim | Terminations L3 | Termination fees, a blackout notice |
+| Dana Kim | Terminations L3 (integration admin) | Termination fees, a blackout notice; can test integrations |
 | Olivia Grant | None (auditor) | Nothing: read-only access to every case and the **Audit log** |
 
 ## 3. Work a task

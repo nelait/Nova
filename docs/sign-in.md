@@ -128,27 +128,76 @@ provider through [SCIM import](users-and-routing.md):
 - **Deactivating a user ends their access immediately**, including sessions already open.
 - Sign-ins and sign-outs are audited as `user.signed-in` and `user.signed-out`.
 
-## Roles
+## Roles and permissions
 
-Roles are identity-provider groups named `role:<name>`, imported through SCIM
-like skill groups, or `"roles": [...]` in a direct import. Without a role, a
-person works the tasks their skills qualify them for.
+What a person may do is set by **roles**, each a bundle of **permissions**,
+defined in `config/roles.json`. People get roles from identity-provider groups
+named `role:<name>` (imported through SCIM like skill groups, or `"roles": [...]`
+in a direct import). **Everyone has the default role, `specialist`**; other roles
+add to it. What *work* a person is routed is still decided by their skills and
+levels.
 
-| Role | Group | Can |
+### Permissions
+
+| Permission | Allows |
+|---|---|
+| `cases.start` | Start requests: installations, maintenance and terminations (**New request**) |
+| `tasks.work` | Be routed tasks and work your own: complete, ask Claude, run agents, hand back to routing |
+| `tasks.override` | Override a failed automatic step on your own task, with a justification |
+| `tasks.reassign` | Reassign anyone's task (without it, only your own) |
+| `cases.cancel` | Cancel an open case |
+| `plans.edit` | Edit a plan's details directly, outside a case (API only) |
+| `users.manage` | Import users from the identity provider; activate and deactivate users |
+| `integrations.test` | Test an integration's connection, which calls the external system |
+| `audit.read` | See and download the full **Audit log** |
+
+Everyone signed in can see cases and their own audit trails, plans, rules,
+integrations and their call log, agents, emails and insights, and run a rule
+set's tests.
+
+### Roles shipped
+
+| Role | Group | Adds |
 |---|---|---|
-| **Admin** | `role:admin` | Everything a specialist can, plus: import users, activate or deactivate users, cancel cases, test integration connections, reassign other people's tasks |
-| **Auditor** | `role:auditor` | **Read-only.** See every case and its audit trail, plans, rules, integrations and their call log, agents, emails, insights, and the full **Audit log** with filters and CSV download. Run a rule set's tests. Can't start, work, approve, reassign or cancel anything, and is **never routed work**, even with skills. |
-| *(none)* | | Start requests, work their own tasks and hand them back to routing, ask Claude, approve agent proposals on their tasks, view everything |
+| **specialist** | *(everyone)* | `cases.start`, `tasks.work`, `tasks.override` |
+| **supervisor** | `role:supervisor` | `tasks.reassign`, `cases.cancel`, `plans.edit`, `audit.read` |
+| **user-admin** | `role:user-admin` | `users.manage`, `audit.read` |
+| **integration-admin** | `role:integration-admin` | `integrations.test` |
+| **admin** | `role:admin` | Everything |
+| **auditor** | `role:auditor` | `audit.read`, and **read-only**: every permission that changes something is removed, whatever other roles the person has, and they are never routed work |
 
 **Read-only wins.** Someone with both `role:auditor` and `role:admin` is
 read-only, so adding a group can't quietly give an audit account write access.
 
-To try it, sign in as **Olivia Grant** in `npm run demo:sso`, or pick her in
-**Working as** in development mode.
+The **Team & skills** screen shows each person's roles and a table of what each
+role allows. In the demo, try **Elena Garcia** (supervisor), **Dana Kim**
+(integration admin), **Olivia Grant** (auditor) and **Priya Shah** (admin).
 
-What work a person gets is still decided by their skills and levels, as before.
-The server enforces every rule; the UI hides controls a person can't use. The
-demo-only *Simulate TRAC outage* button doesn't exist with single sign-on.
+### Changing roles
+
+Edit `config/roles.json` and restart. For example, to let only supervisors
+override failed automatic steps, remove `tasks.override` from `specialist` and
+add it to `supervisor`. To have client-services staff who start requests but
+are never routed work, make the default role empty and give people a role with
+only `cases.start`:
+
+```json
+{
+  "defaultRoles": [],
+  "roles": {
+    "specialist": { "description": "Works tasks.", "permissions": ["cases.start", "tasks.work", "tasks.override"] },
+    "intake": { "description": "Client services: start requests only.", "permissions": ["cases.start"] }
+  }
+}
+```
+
+The file is checked at startup: an unknown permission, a missing default role
+or a badly named role stops the server with a message saying which. Role names
+are lowercase letters, digits and dashes. Groups for roles that don't exist are
+ignored. Every API route that changes data names the permission it needs; the
+server refuses to start if one doesn't. The server enforces permissions; the
+UI only hides controls a person can't use. The demo-only *Simulate TRAC outage*
+button needs `integrations.test` and doesn't exist with single sign-on.
 
 ## How it's protected
 

@@ -253,41 +253,127 @@ provider through <a href="users-and-routing.html">SCIM import</a>:</p>
 <li><strong>Deactivating a user ends their access immediately</strong>, including sessions already open.</li>
 <li>Sign-ins and sign-outs are audited as <code>user.signed-in</code> and <code>user.signed-out</code>.</li>
 </ul>
-<h2 id="roles">Roles</h2>
-<p>Roles are identity-provider groups named <code>role:&lt;name&gt;</code>, imported through SCIM
-like skill groups, or <code>&quot;roles&quot;: [...]</code> in a direct import. Without a role, a
-person works the tasks their skills qualify them for.</p>
+<h2 id="roles-and-permissions">Roles and permissions</h2>
+<p>What a person may do is set by <strong>roles</strong>, each a bundle of <strong>permissions</strong>,
+defined in <code>config/roles.json</code>. People get roles from identity-provider groups
+named <code>role:&lt;name&gt;</code> (imported through SCIM like skill groups, or <code>&quot;roles&quot;: [...]</code>
+in a direct import). <strong>Everyone has the default role, <code>specialist</code></strong>; other roles
+add to it. What <em>work</em> a person is routed is still decided by their skills and
+levels.</p>
+<h3 id="permissions">Permissions</h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Permission</th>
+<th>Allows</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>cases.start</code></td>
+<td>Start requests: installations, maintenance and terminations (<strong>New request</strong>)</td>
+</tr>
+<tr>
+<td><code>tasks.work</code></td>
+<td>Be routed tasks and work your own: complete, ask Claude, run agents, hand back to routing</td>
+</tr>
+<tr>
+<td><code>tasks.override</code></td>
+<td>Override a failed automatic step on your own task, with a justification</td>
+</tr>
+<tr>
+<td><code>tasks.reassign</code></td>
+<td>Reassign anyone&#39;s task (without it, only your own)</td>
+</tr>
+<tr>
+<td><code>cases.cancel</code></td>
+<td>Cancel an open case</td>
+</tr>
+<tr>
+<td><code>plans.edit</code></td>
+<td>Edit a plan&#39;s details directly, outside a case (API only)</td>
+</tr>
+<tr>
+<td><code>users.manage</code></td>
+<td>Import users from the identity provider; activate and deactivate users</td>
+</tr>
+<tr>
+<td><code>integrations.test</code></td>
+<td>Test an integration&#39;s connection, which calls the external system</td>
+</tr>
+<tr>
+<td><code>audit.read</code></td>
+<td>See and download the full <strong>Audit log</strong></td>
+</tr>
+</tbody></table></div>
+<p>Everyone signed in can see cases and their own audit trails, plans, rules,
+integrations and their call log, agents, emails and insights, and run a rule
+set&#39;s tests.</p>
+<h3 id="roles-shipped">Roles shipped</h3>
 <div class="table-wrap"><table>
 <thead>
 <tr>
 <th>Role</th>
 <th>Group</th>
-<th>Can</th>
+<th>Adds</th>
 </tr>
 </thead>
 <tbody><tr>
-<td><strong>Admin</strong></td>
+<td><strong>specialist</strong></td>
+<td><em>(everyone)</em></td>
+<td><code>cases.start</code>, <code>tasks.work</code>, <code>tasks.override</code></td>
+</tr>
+<tr>
+<td><strong>supervisor</strong></td>
+<td><code>role:supervisor</code></td>
+<td><code>tasks.reassign</code>, <code>cases.cancel</code>, <code>plans.edit</code>, <code>audit.read</code></td>
+</tr>
+<tr>
+<td><strong>user-admin</strong></td>
+<td><code>role:user-admin</code></td>
+<td><code>users.manage</code>, <code>audit.read</code></td>
+</tr>
+<tr>
+<td><strong>integration-admin</strong></td>
+<td><code>role:integration-admin</code></td>
+<td><code>integrations.test</code></td>
+</tr>
+<tr>
+<td><strong>admin</strong></td>
 <td><code>role:admin</code></td>
-<td>Everything a specialist can, plus: import users, activate or deactivate users, cancel cases, test integration connections, reassign other people&#39;s tasks</td>
+<td>Everything</td>
 </tr>
 <tr>
-<td><strong>Auditor</strong></td>
+<td><strong>auditor</strong></td>
 <td><code>role:auditor</code></td>
-<td><strong>Read-only.</strong> See every case and its audit trail, plans, rules, integrations and their call log, agents, emails, insights, and the full <strong>Audit log</strong> with filters and CSV download. Run a rule set&#39;s tests. Can&#39;t start, work, approve, reassign or cancel anything, and is <strong>never routed work</strong>, even with skills.</td>
-</tr>
-<tr>
-<td><em>(none)</em></td>
-<td></td>
-<td>Start requests, work their own tasks and hand them back to routing, ask Claude, approve agent proposals on their tasks, view everything</td>
+<td><code>audit.read</code>, and <strong>read-only</strong>: every permission that changes something is removed, whatever other roles the person has, and they are never routed work</td>
 </tr>
 </tbody></table></div>
 <p><strong>Read-only wins.</strong> Someone with both <code>role:auditor</code> and <code>role:admin</code> is
 read-only, so adding a group can&#39;t quietly give an audit account write access.</p>
-<p>To try it, sign in as <strong>Olivia Grant</strong> in <code>npm run demo:sso</code>, or pick her in
-<strong>Working as</strong> in development mode.</p>
-<p>What work a person gets is still decided by their skills and levels, as before.
-The server enforces every rule; the UI hides controls a person can&#39;t use. The
-demo-only <em>Simulate TRAC outage</em> button doesn&#39;t exist with single sign-on.</p>
+<p>The <strong>Team &amp; skills</strong> screen shows each person&#39;s roles and a table of what each
+role allows. In the demo, try <strong>Elena Garcia</strong> (supervisor), <strong>Dana Kim</strong>
+(integration admin), <strong>Olivia Grant</strong> (auditor) and <strong>Priya Shah</strong> (admin).</p>
+<h3 id="changing-roles">Changing roles</h3>
+<p>Edit <code>config/roles.json</code> and restart. For example, to let only supervisors
+override failed automatic steps, remove <code>tasks.override</code> from <code>specialist</code> and
+add it to <code>supervisor</code>. To have client-services staff who start requests but
+are never routed work, make the default role empty and give people a role with
+only <code>cases.start</code>:</p>
+<pre><code class="language-json">{
+  &quot;defaultRoles&quot;: [],
+  &quot;roles&quot;: {
+    &quot;specialist&quot;: { &quot;description&quot;: &quot;Works tasks.&quot;, &quot;permissions&quot;: [&quot;cases.start&quot;, &quot;tasks.work&quot;, &quot;tasks.override&quot;] },
+    &quot;intake&quot;: { &quot;description&quot;: &quot;Client services: start requests only.&quot;, &quot;permissions&quot;: [&quot;cases.start&quot;] }
+  }
+}
+</code></pre>
+<p>The file is checked at startup: an unknown permission, a missing default role
+or a badly named role stops the server with a message saying which. Role names
+are lowercase letters, digits and dashes. Groups for roles that don&#39;t exist are
+ignored. Every API route that changes data names the permission it needs; the
+server refuses to start if one doesn&#39;t. The server enforces permissions; the
+UI only hides controls a person can&#39;t use. The demo-only <em>Simulate TRAC outage</em>
+button needs <code>integrations.test</code> and doesn&#39;t exist with single sign-on.</p>
 <h2 id="how-it39s-protected">How it&#39;s protected</h2>
 <ul>
 <li><strong>Authorization code flow with PKCE</strong>, <code>state</code> bound to the browser by a short-lived cookie, and a <code>nonce</code> in the ID token, so a stolen or replayed sign-in link can&#39;t log someone in.</li>
@@ -475,7 +561,7 @@ identity provider after signing out here, so the next sign-in can be immediate.<
       <a href="deployment.html" style="text-align:right"><small>Next</small>Deployment</a>
     </nav>
   </article>
-  <aside class="toc"><b>On this page</b><a href="#try-it-locally">Try it locally</a><a href="#set-up-openid-connect">Set up OpenID Connect</a><a href="#set-up-saml">Set up SAML</a><a href="#who-can-sign-in">Who can sign in</a><a href="#roles">Roles</a><a href="#how-it39s-protected">How it&amp;#39;s protected</a><a href="#signing-out-and-single-logout">Signing out and single logout</a><a href="#troubleshooting">Troubleshooting</a></aside>
+  <aside class="toc"><b>On this page</b><a href="#try-it-locally">Try it locally</a><a href="#set-up-openid-connect">Set up OpenID Connect</a><a href="#set-up-saml">Set up SAML</a><a href="#who-can-sign-in">Who can sign in</a><a href="#roles-and-permissions">Roles and permissions</a><a href="#how-it39s-protected">How it&amp;#39;s protected</a><a href="#signing-out-and-single-logout">Signing out and single logout</a><a href="#troubleshooting">Troubleshooting</a></aside>
 </div>
 <script>
   (function () {

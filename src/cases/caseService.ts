@@ -1,4 +1,3 @@
-import { isAuditor } from '../users/roles.ts';
 import type { AuditEvent, Case, Plan, PlanDetails, Task, User } from '../domain/types.ts';
 import { addHours, newId, type Clock } from '../domain/util.ts';
 import { Collection, ValidationError } from '../store/db.ts';
@@ -321,7 +320,8 @@ export class CaseService {
   /** Route every ready human task that has no owner (optionally only for one case). */
   routeUnassigned(caseId?: string): number {
     let routed = 0;
-    const users = this.users.list();
+    // Only people who may be given tasks (roles), then by skill (router).
+    const users = this.users.workers();
     const pending = this.r.tasks.find((t) => t.status === 'READY' && !t.assigneeId && this.needsHuman(t) && (!caseId || t.caseId === caseId));
     for (const t of pending) {
       const decision = routeTask(t, users, this.openLoad(), [], this.lastAssigned());
@@ -425,10 +425,10 @@ export class CaseService {
     if (target) {
       const u = this.users.get(target);
       if (!u?.active) throw new ValidationError(`User ${target} is not active`);
-      if (isAuditor(u)) throw new ValidationError(`${u.name} is an auditor (read-only) and can't be given tasks`);
+      if (!this.users.can(u, 'tasks.work')) throw new ValidationError(`${u.name} can't be given tasks (no tasks.work permission; auditors are read-only)`);
       if (!u.skills.some((s) => s.skill === t.skill && s.level >= t.minSkillLevel)) throw new ValidationError(`${u.name} lacks ${t.skill} L${t.minSkillLevel}`);
     } else {
-      target = routeTask(t, this.users.list(), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;
+      target = routeTask(t, this.users.workers(), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;
     }
     return this.save(t, { assigneeId: target, status: 'READY', startedAt: undefined }, by, 'reassigned', { from: t.assigneeId, to: target ?? null });
   }

@@ -78,7 +78,8 @@ test('API needs a session; signing in through the identity provider creates one'
   const me = await (await get('/api/me', cookie)).json();
   assert.equal(me.mode, 'oidc');
   assert.equal(me.user.id, 'u_priya');
-  assert.deepEqual(me.user.roles, ['admin']);
+  assert.deepEqual(me.user.roles, ['specialist', 'admin']);
+  assert.ok(me.user.permissions.includes('users.manage'));
   assert.ok(app.repos.audit.all().some((e) => e.event === 'user.signed-in' && e.actor === 'u_priya'));
 });
 
@@ -210,7 +211,7 @@ test('development mode: localhost only, no sign-in routes, admin still enforced'
 test('auditors can read everything but change nothing', async () => {
   const { cookie } = await signIn('olivia@planops.example');
   const me = await (await get('/api/me', cookie)).json();
-  assert.deepEqual([me.user.roles, me.user.readOnly, me.user.admin], [['auditor'], true, false]);
+  assert.deepEqual([me.user.roles, me.user.readOnly, me.user.permissions], [['specialist', 'auditor'], true, ['audit.read']]);
   for (const path of ['/api/cases', '/api/plans', '/api/audit', '/api/users', '/api/integrations/calls', '/api/outbox', '/api/insights', '/api/rules']) {
     assert.equal((await get(path, cookie)).status, 200, path);
   }

@@ -82,14 +82,15 @@ identity provider:</p>
 deactivated. Importing re-runs routing, so waiting tasks go to newly qualified
 people straight away. The <strong>Team &amp; skills</strong> screen does the same import from a
 pasted payload. For local testing, <code>config/users.json</code> seeds a sample team.</p>
-<p>The group <code>role:admin</code> grants the admin role (importing and deactivating users,
-cancelling cases, reassigning other people&#39;s tasks). Importing users needs the
-admin role. The group <code>role:auditor</code> gives read-only access; auditors are skipped
-by routing and can&#39;t be given tasks, even if they hold skills. People sign in with the same email their user record has; see
+<p>Groups named <code>role:&lt;name&gt;</code> give people roles such as <code>supervisor</code>, <code>user-admin</code>
+or <code>auditor</code>, which decide what they may do; see <a href="sign-in.html#roles-and-permissions">Roles and permissions</a>.
+Importing users needs the <code>users.manage</code> permission. Only people with the
+<code>tasks.work</code> permission are routed work: auditors (read-only) never are, even if
+they hold skills. People sign in with the same email their user record has; see
 <a href="sign-in.html">Sign-in</a>. Deactivated users are signed out at once.</p>
 <h2 id="how-work-is-routed">How work is routed</h2>
 <ol>
-<li><strong>Eligible:</strong> active, not an auditor, holds the step&#39;s skill at or above its minimum level, and below capacity.</li>
+<li><strong>Eligible:</strong> active, has the <code>tasks.work</code> permission (not an auditor), holds the step&#39;s skill at or above its minimum level, and below capacity.</li>
 <li><strong>Least loaded:</strong> the lowest ratio of open tasks to capacity.</li>
 <li><strong>Ties rotate:</strong> among equally loaded people, whoever was assigned work least recently goes next. Seniority does not win ties, so work is shared evenly.</li>
 <li><strong>Deterministic:</strong> the final tie-break is the user id.</li>

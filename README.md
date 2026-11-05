@@ -111,8 +111,9 @@ npm run demo:saml    # demo plus a mock SAML 2.0 provider on :3202 (app portal: 
 In production, set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` (and
 `OIDC_CLIENT_SECRET`) to sign people in through Okta, Entra ID, Google or any
 OIDC provider, or `SAML_IDP_SSO_URL`, `SAML_IDP_ENTITY_ID`, `SAML_IDP_CERT` and
-`SAML_ACS_URL` for SAML 2.0 (ADFS, Shibboleth, or a SAML app in Okta or Entra ID). Users must exist and be active in the directory; the `role:admin`
-group grants admin actions. Without these settings the app runs in development
+`SAML_ACS_URL` for SAML 2.0 (ADFS, Shibboleth, or a SAML app in Okta or Entra ID). Users must exist and be active in the directory; groups such as `role:supervisor`,
+`role:user-admin` or `role:auditor` grant roles, whose permissions are set in
+`config/roles.json`. Without these settings the app runs in development
 mode (pick a user, no sign-in) and only listens on localhost. Single logout
 works both ways: signing out here signs you out at the provider, and signing out
 there (or an admin revoking the session) ends sessions here. See

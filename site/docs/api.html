@@ -37,9 +37,11 @@ from this site&#39;s own origin.</p>
 <p><strong>Who is calling.</strong> With <a href="sign-in.html">single sign-on</a> (OIDC or SAML), the session cookie set at
 sign-in identifies the user; without one the API returns 401
 <code>{ &quot;error&quot;: &quot;Sign in required&quot;, &quot;signIn&quot;: &quot;/auth/login&quot; }</code>. In development mode
-(localhost only) the acting user is the <code>x-user-id</code> header. Routes marked
-<strong>admin</strong> need the admin role. Auditors (read-only) can use every <code>GET</code> route and
-the rule <code>test</code> and <code>evaluate</code> routes; anything else returns 403.</p>
+(localhost only) the acting user is the <code>x-user-id</code> header.</p>
+<p><strong>Permissions.</strong> Routes that change data need the <a href="sign-in.html#permissions">permission</a>
+shown in <strong>bold</strong>; without it they return 403 naming it. Read-only routes need
+none, except the audit log. Auditors can use every <code>GET</code> route they have
+permission for and the rule <code>test</code> and <code>evaluate</code> routes.</p>
 <p>Errors return <code>{ &quot;error&quot;: &quot;...&quot;, &quot;issues&quot;: [...] }</code> with status 401 (not signed
 in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
 503 (AI unavailable) or 500.</p>
@@ -90,7 +92,12 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>GET</td>
 <td><code>/api/me</code></td>
-<td><code>{ mode: &quot;oidc&quot; | &quot;saml&quot; | &quot;dev&quot;, user }</code></td>
+<td><code>{ mode: &quot;oidc&quot; | &quot;saml&quot; | &quot;dev&quot;, user: { id, name, email, roles, permissions, readOnly, skills } }</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/roles</code></td>
+<td>Permissions, roles and default roles from <code>config/roles.json</code></td>
 </tr>
 </tbody></table></div>
 <h2 id="requests-and-cases">Requests and cases</h2>
@@ -105,7 +112,7 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tbody><tr>
 <td>POST</td>
 <td><code>/api/intake</code></td>
-<td>Start a case. <code>{ caseType, channel, clientId?, planId?, data?, documentText? }</code>. <code>channel</code> is <code>DIGITAL</code>, <code>MANUAL</code> or <code>PAPER</code>; paper takes <code>documentText</code>. Maintenance and termination need <code>planId</code>.</td>
+<td>Start a case. <code>{ caseType, channel, clientId?, planId?, data?, documentText? }</code>. <code>channel</code> is <code>DIGITAL</code>, <code>MANUAL</code> or <code>PAPER</code>; paper takes <code>documentText</code>. Maintenance and termination need <code>planId</code>. · <strong>cases.start</strong></td>
 </tr>
 <tr>
 <td>GET</td>
@@ -120,7 +127,7 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>POST</td>
 <td><code>/api/cases/:id/cancel</code></td>
-<td><code>{ reason }</code> <strong>admin</strong></td>
+<td><code>{ reason }</code> · <strong>cases.cancel</strong></td>
 </tr>
 <tr>
 <td>GET</td>
@@ -130,7 +137,7 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>PATCH</td>
 <td><code>/api/plans/:id</code></td>
-<td>Correct onboarding data. Only before the plan is on the recordkeeper.</td>
+<td>Correct onboarding data. Only before the plan is on the recordkeeper. · <strong>plans.edit</strong></td>
 </tr>
 </tbody></table></div>
 <p>Example: start an installation.</p>
@@ -169,27 +176,27 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>POST</td>
 <td><code>/api/tasks/:id/start</code></td>
-<td>Start working a task</td>
+<td>Start working a task · <strong>tasks.work</strong></td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/tasks/:id/complete</code></td>
-<td>Approve, confirm, retry or override. <code>{ notes?, edits?, override?, draftSource? }</code>. <code>edits</code> is <code>{ subject, body }</code> for emails or <code>{ output }</code> for AI agent steps.</td>
+<td>Approve, confirm, retry or override. <code>{ notes?, edits?, override?, draftSource? }</code>. <code>edits</code> is <code>{ subject, body }</code> for emails or <code>{ output }</code> for AI agent steps. · <strong>tasks.work</strong>; <code>override</code> also needs <strong>tasks.override</strong></td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/tasks/:id/reassign</code></td>
-<td><code>{ toUserId? }</code>. Omit to route again. Your own task, or <strong>admin</strong> for anyone&#39;s.</td>
+<td><code>{ toUserId? }</code>. Omit to route again. Your own task with <strong>tasks.work</strong>, anyone&#39;s with <strong>tasks.reassign</strong>.</td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/tasks/:id/agent/run</code></td>
-<td>Ask the AI agent for a new proposal</td>
+<td>Ask the AI agent for a new proposal · <strong>tasks.work</strong></td>
 </tr>
 <tr>
 <td>GET / POST</td>
 <td><code>/api/tasks/:id/ai-assist</code></td>
-<td>Stored Claude assist / ask Claude (<code>{ refresh? }</code>)</td>
+<td>Stored Claude assist / ask Claude (<code>{ refresh? }</code>); POST needs <strong>tasks.work</strong></td>
 </tr>
 </tbody></table></div>
 <h2 id="configuration-read-only">Configuration (read-only)</h2>
@@ -229,7 +236,7 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>POST</td>
 <td><code>/api/integrations/:id/test</code></td>
-<td>Run a system&#39;s health check <strong>admin</strong></td>
+<td>Run a system&#39;s health check · <strong>integrations.test</strong></td>
 </tr>
 <tr>
 <td>GET</td>
@@ -254,17 +261,17 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>POST</td>
 <td><code>/api/users/import/scim</code></td>
-<td>SCIM 2.0 import. See <a href="users-and-routing.html">Users and routing</a>. <strong>admin</strong></td>
+<td>SCIM 2.0 import. See <a href="users-and-routing.html">Users and routing</a>. · <strong>users.manage</strong></td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/users/import</code></td>
-<td>Plain JSON import <strong>admin</strong></td>
+<td>Plain JSON import · <strong>users.manage</strong></td>
 </tr>
 <tr>
 <td>POST</td>
 <td><code>/api/users/:id/active</code></td>
-<td><code>{ active }</code> <strong>admin</strong></td>
+<td><code>{ active }</code> · <strong>users.manage</strong></td>
 </tr>
 </tbody></table></div>
 <h2 id="monitoring">Monitoring</h2>
@@ -284,7 +291,7 @@ in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system)
 <tr>
 <td>GET</td>
 <td><code>/api/audit</code></td>
-<td>Audit events, newest first. Filters: <code>actor</code>, <code>event</code> (prefix, e.g. <code>task.</code>), <code>entityId</code>, <code>from</code>, <code>to</code> (ISO dates; <code>to</code> exclusive), <code>limit</code> (default 200, max 10,000). <code>format=csv</code> downloads a CSV.</td>
+<td>Audit events, newest first. Filters: <code>actor</code>, <code>event</code> (prefix, e.g. <code>task.</code>), <code>entityId</code>, <code>from</code>, <code>to</code> (ISO dates; <code>to</code> exclusive), <code>limit</code> (default 200, max 10,000). <code>format=csv</code> downloads a CSV. · <strong>audit.read</strong></td>
 </tr>
 <tr>
 <td>GET</td>

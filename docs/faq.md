@@ -32,10 +32,12 @@ providers). Plan Ops Hub never handles passwords, and people must
 also be active users in its directory. See [Sign-in](sign-in.md).
 
 **Can our internal audit or compliance reviewers look without changing anything?**
-Yes. Give them the `role:auditor` group. Auditors see every case, its audit
+Yes. Give them the `role:auditor` group. (Other roles split up administration:
+`supervisor`, `user-admin` and `integration-admin`; you can define your own in
+`config/roles.json`. See [Roles and permissions](sign-in.md#roles-and-permissions).) Auditors see every case, its audit
 trail, emails and integration calls, and can filter and download the full audit
 log as CSV. They can't change anything and are never assigned work. See
-[Sign-in](sign-in.md#roles).
+[Roles and permissions](sign-in.md#roles-and-permissions).
 
 ## Troubleshooting
 

@@ -1,5 +1,4 @@
 import type { Task, User } from '../domain/types.ts';
-import { canWork } from '../users/roles.ts';
 
 export interface RoutingDecision {
   assigneeId?: string;
@@ -29,7 +28,7 @@ export function routeTask(
   lastAssigned: Map<string, number> = new Map(),
 ): RoutingDecision {
   const candidates = users
-    .filter((u) => canWork(u) && !excludeUserIds.includes(u.id))
+    .filter((u) => u.active && !excludeUserIds.includes(u.id))
     .map((u) => {
       const grant = u.skills.find((s) => s.skill === task.skill);
       return { user: u, level: grant?.level ?? 0, load: openLoad.get(u.id) ?? 0, last: lastAssigned.get(u.id) ?? -1 };

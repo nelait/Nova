@@ -17,6 +17,7 @@ import { AiAssistService, claudeModelCall, type AiAssist, type ModelCall } from 
 import { AgentRunner, claudeAgentModel, type AgentModel } from './ai/agents.ts';
 import { AuthService, type LoginRequest, type PendingIdpSignIn, type SeenToken, type Session } from './auth/auth.ts';
 import { OidcClient, oidcConfigFromEnv } from './auth/oidc.ts';
+import { RoleModel } from './users/roles.ts';
 import { SamlClient, samlConfigFromEnv, type PendingSamlRequest } from './auth/saml.ts';
 
 export interface AppOptions {
@@ -77,7 +78,7 @@ export function createApp(opts: AppOptions = {}) {
   const agentModel = opts.agentModel === undefined ? (hasAnthropicCredentials() ? claudeAgentModel() : undefined) : (opts.agentModel ?? undefined);
   const agents = new AgentRunner(kb.agents, integrations, agentModel);
   const executor = new ActionExecutor(kb, integrations, email, agents);
-  const users = new UserDirectory(usersRepo);
+  const users = new UserDirectory(usersRepo, RoleModel.load(join(configDir, 'roles.json')));
   const cases = new CaseService(repos, kb, executor, integrations, users, clock);
 
   // Sign-in: single sign-on when OIDC_* or SAML_* is configured, otherwise development mode.
@@ -119,7 +120,7 @@ export function createApp(opts: AppOptions = {}) {
     guidance,
     ai,
     auth,
-    insights: () => computeInsights(repos.cases.all(), repos.tasks.all(), users.list(), clock.now()),
+    insights: () => computeInsights(repos.cases.all(), repos.tasks.all(), users.workers(), clock.now()),
   };
 }
 

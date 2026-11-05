@@ -1,5 +1,4 @@
 import type { Case, Task, User } from '../domain/types.ts';
-import { canWork } from '../users/roles.ts';
 
 export interface StepStats {
   caseType: string;
@@ -108,7 +107,7 @@ export function computeInsights(cases: Case[], tasks: Task[], users: User[], now
     backlogBySkill[t.skill] = (backlogBySkill[t.skill] ?? 0) + 1;
   }
   for (const [skill, n] of Object.entries(backlogBySkill)) {
-    const holders = users.filter((u) => canWork(u) && u.skills.some((s) => s.skill === skill)).length;
+    const holders = users.filter((u) => u.active && u.skills.some((s) => s.skill === skill)).length;
     suggestions.push({ kind: 'add-capacity', target: skill, message: `${n} task(s) waiting with no eligible assignee (${holders} active user(s) hold ${skill}). Add capacity or cross-train.` });
   }
 

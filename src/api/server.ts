@@ -11,20 +11,24 @@ import { IntegrationError } from '../integrations/client.ts';
 import { AgentError } from '../ai/agents.ts';
 import { AuthError } from '../auth/oidc.ts';
 import type { AuditEvent, User } from '../domain/types.ts';
-import { isAdmin as hasAdmin, isAuditor } from '../users/roles.ts';
+import { PERMISSIONS, type Permission } from '../users/roles.ts';
 
-type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string; me?: User; isAdmin: boolean }) => unknown;
+type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string; me?: User; can: (p: Permission) => boolean }) => unknown;
 
 /**
- * Routes marked `admin` need the admin role (identity-provider group role:admin).
- * Auditors (role:auditor) may only use GET routes and POST routes marked
- * `readOnly`, which compute an answer without changing anything.
+ * Every route that changes something names the permission it needs (see
+ * config/roles.json). Routes that only read need none, unless they name one;
+ * `readOnly` marks a POST that only computes an answer (rule tests).
+ * Registering a changing route without a permission is a startup error.
  */
-const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler; admin: boolean; readOnly: boolean }[] = [];
-function route(method: string, path: string, handler: Handler, opts: { admin?: boolean; readOnly?: boolean } = {}) {
+const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler; perm?: Permission[]; readOnly: boolean }[] = [];
+/** `perm`: the permission needed; a list means any one of them. */
+function route(method: string, path: string, handler: Handler, opts: { perm?: Permission | Permission[]; readOnly?: boolean } = {}) {
+  const readOnly = method === 'GET' || !!opts.readOnly;
+  if (!readOnly && !opts.perm) throw new Error(`${method} ${path} changes data but names no permission`);
   const keys: string[] = [];
   const pattern = new RegExp('^' + path.replace(/:(\w+)/g, (_m, k: string) => (keys.push(k), '([^/]+)')) + '$');
-  routes.push({ method, pattern, keys, handler, admin: !!opts.admin, readOnly: method === 'GET' || !!opts.readOnly });
+  routes.push({ method, pattern, keys, handler, perm: opts.perm === undefined ? undefined : [opts.perm].flat(), readOnly });
 }
 
 class ForbiddenError extends Error {}
@@ -32,8 +36,21 @@ class ForbiddenError extends Error {}
 // --- who am I
 route('GET', '/api/me', ({ app, me }) => ({
   mode: app.auth.mode,
-  user: me ? { id: me.id, name: me.name, email: me.email, roles: me.roles ?? [], skills: me.skills, readOnly: isAuditor(me), admin: hasAdmin(me) } : null,
+  user: me
+    ? {
+        id: me.id,
+        name: me.name,
+        email: me.email,
+        roles: app.users.roles.rolesOf(me),
+        permissions: app.users.roles.permissions(me),
+        readOnly: app.users.roles.isReadOnly(me),
+        skills: me.skills,
+      }
+    : null,
 }));
+
+// --- roles and permissions, for the Team screen and administrators
+route('GET', '/api/roles', ({ app }) => ({ permissions: PERMISSIONS, ...app.users.roles.config }));
 
 // --- reference data
 route('GET', '/api/playbooks', ({ app }) => app.kb.listPlaybooks());
@@ -44,25 +61,25 @@ route('GET', '/api/users', ({ app }) => {
   const load = app.cases.openLoad();
   return app.users.list().map((u) => ({ ...u, openTasks: load.get(u.id) ?? 0 }));
 });
-route('POST', '/api/users/import', ({ app, body }) => app.users.import(body.users, body.source ?? 'api', !!body.fullSync), { admin: true });
+route('POST', '/api/users/import', ({ app, body }) => app.users.import(body.users, body.source ?? 'api', !!body.fullSync), { perm: 'users.manage' });
 route('POST', '/api/users/import/scim', ({ app, body }) => {
   const out = app.users.importScim(body.Resources ?? body.users, body.source ?? 'scim', !!body.fullSync);
   app.cases.routeUnassigned();
   return out;
-}, { admin: true });
+}, { perm: 'users.manage' });
 route('POST', '/api/users/:id/active', ({ app, params, body }) => {
   const u = app.users.setActive(params.id, !!body.active);
   app.cases.routeUnassigned();
   return u;
-}, { admin: true });
+}, { perm: 'users.manage' });
 
 // --- intake (all channels)
-route('POST', '/api/intake', ({ app, body, actor }) => app.cases.submitIntake(body, actor));
+route('POST', '/api/intake', ({ app, body, actor }) => app.cases.submitIntake(body, actor), { perm: 'cases.start' });
 
 // --- plans
 route('GET', '/api/plans', ({ app }) => app.repos.plans.all().reverse());
 route('GET', '/api/plans/:id', ({ app, params }) => app.repos.plans.require(params.id));
-route('PATCH', '/api/plans/:id', ({ app, params, body, actor }) => app.cases.updatePlanDetails(params.id, body, actor));
+route('PATCH', '/api/plans/:id', ({ app, params, body, actor }) => app.cases.updatePlanDetails(params.id, body, actor), { perm: 'plans.edit' });
 
 // --- cases
 route('GET', '/api/cases', ({ app }) =>
@@ -76,7 +93,7 @@ route('GET', '/api/cases/:id', ({ app, params }) => {
   const c = app.repos.cases.require(params.id);
   return { case: c, plan: app.repos.plans.require(c.planId), tasks: app.cases.tasksFor(c.id), audit: app.repos.audit.find((e) => e.caseId === c.id) };
 });
-route('POST', '/api/cases/:id/cancel', ({ app, params, body, actor }) => app.cases.cancelCase(params.id, actor, body.reason ?? ''), { admin: true });
+route('POST', '/api/cases/:id/cancel', ({ app, params, body, actor }) => app.cases.cancelCase(params.id, actor, body.reason ?? ''), { perm: 'cases.cancel' });
 
 // --- work items
 route('GET', '/api/inbox/:userId', ({ app, params }) =>
@@ -87,8 +104,11 @@ route('GET', '/api/inbox/:userId', ({ app, params }) =>
 );
 route('GET', '/api/queue/unassigned', ({ app }) => app.cases.unassignedQueue());
 route('GET', '/api/tasks/:id/guidance', ({ app, params, actor }) => app.guidance.forTask(app.cases.contextFor(app.repos.tasks.require(params.id), actor)));
-route('POST', '/api/tasks/:id/start', ({ app, params, actor }) => app.cases.startTask(params.id, actor));
-route('POST', '/api/tasks/:id/complete', ({ app, params, body, actor }) => app.cases.completeTask(params.id, actor, body));
+route('POST', '/api/tasks/:id/start', ({ app, params, actor }) => app.cases.startTask(params.id, actor), { perm: 'tasks.work' });
+route('POST', '/api/tasks/:id/complete', ({ app, params, body, actor, can }) => {
+  if (body.override && !can('tasks.override')) throw new ForbiddenError('Overriding a failed step needs the tasks.override permission');
+  return app.cases.completeTask(params.id, actor, body);
+}, { perm: 'tasks.work' });
 // --- rules
 route('GET', '/api/rules', ({ app }) =>
   app.kb.rules.list().map((r) => ({
@@ -112,8 +132,8 @@ route('POST', '/api/rules/:id/evaluate', ({ app, params, body }) => {
 
 route('GET', '/api/ai/status', ({ app }) => ({ enabled: app.ai.enabled, model: app.ai.model }));
 route('GET', '/api/tasks/:id/ai-assist', ({ app, params, actor }) => app.ai.cached(params.id, actor));
-route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor }) => app.ai.assist(params.id, actor, !!body.refresh));
-route('POST', '/api/tasks/:id/agent/run', ({ app, params, actor }) => app.cases.rerunAgent(params.id, actor));
+route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor }) => app.ai.assist(params.id, actor, !!body.refresh), { perm: 'tasks.work' });
+route('POST', '/api/tasks/:id/agent/run', ({ app, params, actor }) => app.cases.rerunAgent(params.id, actor), { perm: 'tasks.work' });
 route('GET', '/api/agents', ({ app }) =>
   app.kb.agents.list().map((a) => ({
     ...a,
@@ -121,11 +141,11 @@ route('GET', '/api/agents', ({ app }) =>
     usedBy: app.kb.listPlaybooks().flatMap((p) => p.steps.filter((s) => s.action.type === 'ai.agent' && s.action.params?.agent === a.id).map((s) => `${p.caseType} / ${s.id}`)),
   })),
 );
-route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor, isAdmin }) => {
-  // The task's owner can hand it back to routing; moving anyone else's task needs admin.
-  if (!isAdmin && app.repos.tasks.require(params.id).assigneeId !== actor) throw new ForbiddenError('Only the task owner or an admin can reassign this task');
+route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor, can }) => {
+  // The task's owner can hand it back to routing; moving anyone else's task needs tasks.reassign.
+  if (!can('tasks.reassign') && app.repos.tasks.require(params.id).assigneeId !== actor) throw new ForbiddenError("Reassigning someone else's task needs the tasks.reassign permission");
   return app.cases.reassign(params.id, actor, body.toUserId);
-});
+}, { perm: ['tasks.work', 'tasks.reassign'] });
 
 // --- integrations & learning
 // The Recordkeeper screen reads TRAC through its configured integration, like the engine does.
@@ -135,7 +155,7 @@ route('POST', '/api/trac/simulate-outage', ({ app, body }) => {
   if (app.auth.mode !== 'dev') throw new NotFoundError('No such route');
   app.trac.failNext(Number(body.requests ?? 10));
   return { armed: true };
-}, { admin: true });
+}, { perm: 'integrations.test' });
 
 // --- integrations (configured external systems)
 route('GET', '/api/integrations', ({ app }) =>
@@ -162,7 +182,7 @@ route('GET', '/api/integrations', ({ app }) =>
     })),
   })),
 );
-route('POST', '/api/integrations/:id/test', ({ app, params }) => app.integrations.test(params.id), { admin: true });
+route('POST', '/api/integrations/:id/test', ({ app, params }) => app.integrations.test(params.id), { perm: 'integrations.test' });
 route('GET', '/api/integrations/calls', ({ app, query }) => app.integrations.calls(Number(query.get('limit') ?? 50)));
 route('GET', '/api/outbox', ({ app }) => app.email.list());
 route('GET', '/api/insights', ({ app }) => app.insights());
@@ -177,7 +197,7 @@ route('GET', '/api/audit', ({ app, query }) => {
   const limit = Math.min(Number(q('limit') ?? 200), 10_000);
   if (q('format') === 'csv') return new CsvBody(auditCsv(rows.slice(0, limit)));
   return rows.slice(0, limit);
-});
+}, { perm: 'audit.read' });
 
 /** A handler result sent as a CSV download instead of JSON. */
 class CsvBody {
@@ -419,12 +439,13 @@ export function startServer(app: App, port: number, publicDir: string, opts: { h
         for (const r of routes) {
           const m = req.method === r.method && url.pathname.match(r.pattern);
           if (!m) continue;
-          const isAdmin = hasAdmin(me);
-          if (!r.readOnly && isAuditor(me)) throw new ForbiddenError('Auditors have read-only access');
-          if (r.admin && !isAdmin) throw new ForbiddenError('This action needs the admin role');
+          const can = (p: Permission) => app.users.can(me, p);
+          if (r.perm && !r.perm.some(can)) {
+            throw new ForbiddenError(app.users.roles.isReadOnly(me) ? 'Auditors have read-only access' : `This action needs the ${r.perm.join(' or ')} permission`);
+          }
           const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
           const body = req.method === 'GET' ? {} : await readBody(req);
-          const result = await r.handler({ app, params, body, query: url.searchParams, actor, me, isAdmin });
+          const result = await r.handler({ app, params, body, query: url.searchParams, actor, me, can });
           if (result instanceof CsvBody) {
             res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="plan-ops-audit.csv"', 'cache-control': 'no-store' });
             return void res.end(result.text);

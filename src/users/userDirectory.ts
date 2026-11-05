@@ -1,6 +1,7 @@
 import type { SkillGrant, User } from '../domain/types.ts';
 import type { Collection } from '../store/db.ts';
 import { ValidationError } from '../store/db.ts';
+import type { Permission, RoleModel } from './roles.ts';
 
 /** Minimal SCIM 2.0 user shape, as sent by Okta / Entra ID / Ping provisioning. */
 export interface ScimUser {
@@ -41,9 +42,20 @@ export function scimToUser(s: ScimUser, source: string, capacity = 8): User {
 
 export class UserDirectory {
   private users: Collection<User>;
+  readonly roles: RoleModel;
 
-  constructor(users: Collection<User>) {
+  constructor(users: Collection<User>, roles: RoleModel) {
     this.users = users;
+    this.roles = roles;
+  }
+
+  can(u: User | undefined, p: Permission): boolean {
+    return this.roles.can(u, p);
+  }
+
+  /** Active people who may be given tasks (routing picks among these by skill). */
+  workers(): User[] {
+    return this.users.all().filter((u) => this.roles.canWork(u));
   }
 
   /**

@@ -116,8 +116,17 @@
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
   .kpi b { font: 600 30px/1.1 var(--font-display); display: block; font-variant-numeric: tabular-nums; }
-  body.read-only .writes,
-  body:not(.is-admin) .admin-only, body:not(.dev-mode) .dev-only, body.sso .dev-only { display: none !important; }
+  /* Controls carry needs-<permission>; the body carries can-<permission> for what /api/me grants. */
+  body:not(.can-cases-start) .needs-cases-start,
+  body:not(.can-tasks-work) .needs-tasks-work,
+  body:not(.can-tasks-override) .needs-tasks-override,
+  body:not(.can-tasks-reassign) .needs-tasks-reassign,
+  body:not(.can-cases-cancel) .needs-cases-cancel,
+  body:not(.can-plans-edit) .needs-plans-edit,
+  body:not(.can-users-manage) .needs-users-manage,
+  body:not(.can-integrations-test) .needs-integrations-test,
+  body:not(.can-audit-read) .needs-audit-read,
+  body:not(.dev-mode) .dev-only, body.sso .dev-only { display: none !important; }
   .who { display: flex; align-items: center; gap: 10px; }
   .who .avatar { flex: 0 0 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px; }
   .who div { min-width: 0; } .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .who span { font-size: 12px; color: var(--muted); }
@@ -192,13 +201,14 @@ const SUBTITLES = {
   insights: 'How each step performs, and what to improve',
   audit: 'Every action by people, the router and automation, newest first',
 };
-/** Auditors have no work queue and can't start requests. */
-const HIDDEN_WHEN_READ_ONLY = ['inbox', 'intake'];
+/** Tabs that need a permission (auditors, for example, have no work queue). */
+const TAB_NEEDS = { inbox: 'tasks.work', intake: 'cases.start', audit: 'audit.read' };
+const can = (p) => (state.permissions ?? []).includes(p);
 function renderTabs() {
   const myCount = state.myCount ?? 0;
-  const moved = state.readOnly && HIDDEN_WHEN_READ_ONLY.includes(state.tab);
+  const visible = (k) => !TAB_NEEDS[k] || can(TAB_NEEDS[k]);
+  const moved = !visible(state.tab);
   if (moved) state.tab = 'cases';
-  const visible = (k) => !(state.readOnly && HIDDEN_WHEN_READ_ONLY.includes(k));
   $('#tabs').innerHTML = NAV.map(([group, keys]) => [group, keys.filter(visible)]).filter(([, keys]) => keys.length).map(([group, keys]) => `<div class="navgroup"><span>${group}</span>${keys.map((k) =>
     `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}" ${state.tab === k ? 'aria-current="page"' : ''}>${TABS[k]}${k === 'inbox' && myCount ? `<span class="count">${myCount}</span>` : ''}</button>`).join('')}</div>`).join('');
   $('#pageTitle').textContent = TABS[state.tab];
@@ -312,7 +322,7 @@ async function renderTaskDetail(el, taskId) {
       ${g.allowedActions.includes('approve') ? '<button class="btn" data-act="approve">Approve &amp; execute</button>' : ''}
       ${g.allowedActions.includes('confirm') ? '<button class="btn" data-act="confirm">Confirm done</button>' : ''}
       ${g.allowedActions.includes('retry') ? '<button class="btn" data-act="retry">Retry</button>' : ''}
-      ${g.allowedActions.includes('override') ? '<button class="btn danger" data-act="override">Override (with justification)</button>' : ''}
+      ${g.allowedActions.includes('override') ? '<button class="btn danger needs-tasks-override" data-act="override">Override (with justification)</button>' : ''}
       <button class="btn secondary" data-act="reassign">Reassign</button>
     </div>`;
   el.querySelector('#taskActions').onclick = (e) => guarded(async () => {
@@ -425,7 +435,7 @@ async function renderCases(v) {
     <h3>Steps</h3><div class="steps">${d.tasks.map((t) => `<div class="step"><div><b>${esc(t.name)}</b><div class="small muted">${t.skill}${t.minSkillLevel > 1 ? ' L' + t.minSkillLevel + '+' : ''} · ${t.assigneeId ?? (t.status === 'READY' && t.mode !== 'AUTO' ? 'unassigned queue' : '—')}</div>
       ${t.exception ? `<div class="small" style="color:var(--bad)">${esc(t.exception)}</div>` : ''}
       ${t.status === 'SKIPPED' ? (() => { const h = t.history.find((x) => x.event === 'skipped' && x.detail?.condition); return h ? `<div class="small muted">Skipped: condition not met (<code>${esc(h.detail.condition)}</code>)</div>` : '<div class="small muted">Skipped: case cancelled</div>'; })() : ''}</div><div><span class="chip ${t.mode}">${t.mode}</span>${statusChip(t)}</div></div>`).join('')}</div>
-    ${d.case.status === 'OPEN' ? '<div class="actions admin-only"><button class="btn secondary" id="cancel">Cancel case</button></div>' : ''}
+    ${d.case.status === 'OPEN' ? '<div class="actions needs-cases-cancel"><button class="btn secondary" id="cancel">Cancel case</button></div>' : ''}
     <h3>Audit trail</h3><div class="scroll"><table><tr><th>When</th><th>Who</th><th>Event</th><th>Detail</th></tr>${d.audit.map((a) => `<tr><td class="small">${fmtDate(a.at)}</td><td class="small">${esc(a.actor)}</td><td class="small">${esc(a.event)}</td><td class="small muted">${esc(a.detail ? JSON.stringify(a.detail).slice(0, 140) : '')}</td></tr>`).join('')}</table></div>`;
   $('#cancel')?.addEventListener('click', () => guarded(async () => { const reason = prompt('Reason for cancelling?'); if (!reason) return; await api(`/cases/${state.selCase}/cancel`, { method: 'POST', body: { reason } }); render(); }));
 }
@@ -433,13 +443,22 @@ async function renderCases(v) {
 // ---------------------------------------------------------------- team
 const SCIM_SAMPLE = { source: 'okta', Resources: [{ id: '901', userName: 'kai@planops.example', displayName: 'Kai Brown', emails: [{ value: 'kai@planops.example', primary: true }], groups: [{ display: 'skill:INVESTMENTS:2' }, { display: 'skill:TERMINATIONS:2' }] }] };
 async function renderTeam(v) {
-  const [users, queue] = await Promise.all([api('/users'), api('/queue/unassigned')]);
-  v.innerHTML = `<div class="panel"><h2>Users and skills</h2><div class="scroll"><table><tr><th>User</th><th>Skills</th><th>Load</th><th>Source</th><th>Active</th></tr>
-    ${users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="small muted">${u.id}</div></td><td>${u.skills.map((s) => `<span class="chip">${s.skill} L${s.level}</span>`).join('')}</td><td>${u.openTasks}/${u.capacity}</td><td class="small">${esc(u.source)}</td>
-      <td><input type="checkbox" style="width:auto" data-u="${u.id}" ${u.active ? 'checked' : ''} ${state.isAdmin ? '' : 'disabled title="Needs the admin role"'}></td></tr>`).join('')}</table></div>
+  const [users, queue, roles] = await Promise.all([api('/users'), api('/queue/unassigned'), api('/roles')]);
+  const roleChips = (u) => [...new Set([...roles.defaultRoles, ...(u.roles || [])])].filter((r) => roles.roles[r]).map((r) => `<span class="chip${roles.roles[r].readOnly ? ' exception' : ''}" title="${esc(roles.roles[r].description)}">${esc(r)}</span>`).join('');
+  const perms = Object.keys(roles.permissions);
+  const roleTable = `<h3>Roles and what they allow</h3>
+    <p class="small muted">Defined in <code>config/roles.json</code>. Give someone a role with an identity-provider group named <code>role:&lt;name&gt;</code>. Everyone has ${roles.defaultRoles.map((r) => `<b>${esc(r)}</b>`).join(', ')}. A read-only role removes every permission that changes something.</p>
+    <div class="scroll"><table class="roles"><tr><th>Permission</th>${Object.keys(roles.roles).map((r) => `<th class="small">${esc(r)}</th>`).join('')}</tr>
+    ${perms.map((p) => `<tr><td class="small"><code>${esc(p)}</code><div class="muted">${esc(roles.permissions[p])}</div></td>${Object.values(roles.roles).map((d) => {
+      const has = d.permissions.includes('*') || d.permissions.includes(p);
+      return `<td style="text-align:center">${has ? '<span aria-label="yes">●</span>' : '<span class="muted" aria-label="no">·</span>'}</td>`;
+    }).join('')}</tr>`).join('')}</table></div>`;
+  v.innerHTML = `<div class="panel"><h2>Users, roles and skills</h2><div class="scroll"><table><tr><th>User</th><th>Roles</th><th>Skills</th><th>Load</th><th>Source</th><th>Active</th></tr>
+    ${users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="small muted">${u.id}</div></td><td>${roleChips(u)}</td><td>${u.skills.map((s) => `<span class="chip">${s.skill} L${s.level}</span>`).join('')}</td><td>${u.openTasks}/${u.capacity}</td><td class="small">${esc(u.source)}</td>
+      <td><input type="checkbox" style="width:auto" data-u="${u.id}" ${u.active ? 'checked' : ''} ${can('users.manage') ? '' : 'disabled title="Needs the users.manage permission"'}></td></tr>`).join('')}</table></div>
     <h3>Unassigned queue (${queue.length})</h3>${queue.map((t) => `<div class="small">${esc(t.name)} — needs ${t.skill} L${t.minSkillLevel}+ ${t.exception ? '<span class="chip exception">exception</span>' : ''}</div>`).join('') || '<p class="small muted">Empty.</p>'}
-    <div class="admin-only"><h3>Import users from identity provider (SCIM)</h3><p class="small muted">Skills are IdP groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>. Importing re-runs routing for the unassigned queue.</p>
-    <textarea id="scim" rows="10">${esc(JSON.stringify(SCIM_SAMPLE, null, 2))}</textarea><div class="actions"><button class="btn" id="imp">Import</button></div></div></div>`;
+    <div class="needs-users-manage"><h3>Import users from identity provider (SCIM)</h3><p class="small muted">Skills are IdP groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>. Importing re-runs routing for the unassigned queue.</p>
+    <textarea id="scim" rows="10">${esc(JSON.stringify(SCIM_SAMPLE, null, 2))}</textarea><div class="actions"><button class="btn" id="imp">Import</button></div></div>${roleTable}</div>`;
   v.querySelector('table').onchange = (e) => guarded(async () => { const id = e.target.dataset.u; if (id) { await api(`/users/${id}/active`, { method: 'POST', body: { active: e.target.checked } }); render(); } });
   $('#imp').onclick = () => guarded(async () => { await api('/users/import/scim', { method: 'POST', body: JSON.parse($('#scim').value) }); toast('Imported'); await loadUsers(); render(); });
 }
@@ -449,7 +468,7 @@ async function renderTrac(v) {
   const plans = await api('/trac/plans');
   v.innerHTML = `<div class="panel"><h2>Recordkeeper (TRAC): system of record</h2>
     <p class="small muted">Read live through the <b>trac</b> integration (<code>listPlans</code>). Plans appear here only when an installation's final step succeeds. Maintenance and termination cases read from and write to these records.</p>
-    <div class="actions dev-only admin-only"><button class="btn secondary" id="outage">Simulate TRAC outage (next 10 requests)</button></div>
+    <div class="actions dev-only needs-integrations-test"><button class="btn secondary" id="outage">Simulate TRAC outage (next 10 requests)</button></div>
     <div class="scroll"><table><tr><th>TRAC id</th><th>Sponsor</th><th>Status</th><th>Version</th><th>Funds</th><th>Plan admin</th><th>Updated</th></tr>
     ${plans.map((p) => `<tr><td>${p.id}</td><td>${esc(p.sponsor?.name)}<div class="small muted">${esc(p.sponsor?.ein)}</div></td><td><span class="chip ${p.status}">${p.status}</span>${p.successorProvider ? `<div class="small muted">→ ${esc(p.successorProvider)}</div>` : ''}</td><td>v${p.version}</td>
       <td class="small">${p.funds.map((f) => esc(f.ticker) + (f.qdia ? '*' : '')).join(', ')}</td><td class="small">${esc(p.contacts.find((c) => c.role === 'PLAN_ADMINISTRATOR')?.email)}</td><td class="small">${fmtDate(p.updatedAt)}</td></tr>`).join('')}</table></div></div>`;
@@ -542,7 +561,7 @@ async function renderIntegrations(v) {
     ${systems.map((s) => `<div class="item" style="cursor:default">
       <div class="row" style="align-items:flex-start"><div style="flex:3"><b>${esc(s.name)}</b> <span class="muted small">${esc(s.id)}</span>
         <div class="small muted">${esc(s.description)}</div></div>
-        <div style="flex:0 0 auto" class="admin-only"><button class="btn secondary" data-test="${s.id}">Test connection</button></div></div>
+        <div style="flex:0 0 auto" class="needs-integrations-test"><button class="btn secondary" data-test="${s.id}">Test connection</button></div></div>
       <div class="small" style="margin-top:6px"><span class="chip ${s.mock ? 'MANUAL' : 'DONE'}">${s.mock ? 'built-in mock' : 'live'}</span><code>${esc(s.baseUrl)}</code></div>
       <div class="small" style="margin-top:4px">Auth: <b>${esc(s.auth)}</b> ${s.secrets.map((x) => `<span class="chip ${x.set ? 'DONE' : 'exception'}">${esc(x.env)}: ${x.set ? (s.mock ? 'not needed (mock)' : 'set') : 'missing'}</span>`).join('')}
         · timeout ${s.timeoutMs} ms · up to ${s.retry.attempts} attempts</div>
@@ -589,15 +608,18 @@ async function loadUsers() {
     state.user = state.user ?? (users.some((u) => u.id === saved) ? saved : users[0]?.id);
     $('#userSel').innerHTML = users.filter((u) => u.active).map((u) => `<option value="${u.id}" ${u.id === state.user ? 'selected' : ''}>${esc(u.name)} (${u.openTasks})</option>`).join('');
   }
-  const me = users.find((u) => u.id === state.user);
-  state.myCount = me?.openTasks ?? 0;
-  // The server enforces roles; the UI only hides controls you can't use.
-  // Read-only (auditor) wins over admin, as on the server.
-  state.readOnly = !!me?.roles?.includes('auditor');
-  state.isAdmin = !!me?.roles?.includes('admin') && !state.readOnly;
-  document.body.classList.toggle('is-admin', state.isAdmin);
-  document.body.classList.toggle('read-only', state.readOnly);
-  if (renderTabs()) render(); // an auditor can't stay on My work or New request
+  state.myCount = users.find((u) => u.id === state.user)?.openTasks ?? 0;
+  // Permissions as the server computes them (roles from config/roles.json). The
+  // server enforces them; the UI only hides controls you can't use.
+  const me = (await api('/me')).user;
+  if (me) {
+    state.permissions = me.permissions;
+    state.readOnly = me.readOnly;
+    state.roles = me.roles;
+  }
+  for (const c of [...document.body.classList]) if (c.startsWith('can-')) document.body.classList.remove(c);
+  for (const p of state.permissions ?? []) document.body.classList.add('can-' + p.replace('.', '-'));
+  if (renderTabs()) render(); // e.g. an auditor can't stay on My work or New request
 }
 
 /** Signed-in user card with a sign-out button (single sign-on only). */
