@@ -1,6 +1,6 @@
 {
   "id": "installation",
-  "version": 2,
+  "version": 3,
   "caseType": "INSTALLATION",
   "name": "New plan installation",
   "description": "Take a newly onboarded sponsor from intake to 'Installation Complete' on the recordkeeper.",
@@ -29,6 +29,7 @@
       "id": "verify-sponsor",
       "name": "Verify plan sponsor and authorized signer",
       "skill": "COMPLIANCE",
+      "minSkillLevel": 2,
       "mode": "MANUAL",
       "action": {
         "type": "none"
