@@ -1,0 +1,96 @@
+{
+  "id": "installation-intake",
+  "version": 1,
+  "name": "New plan onboarding checks",
+  "description": "Validates onboarding data before anything is sent to the sponsor or the recordkeeper, and classifies the plan by size.",
+  "decisions": [
+    {
+      "id": "segment",
+      "description": "Plan size segment, which drives the onboarding track",
+      "rows": [
+        { "when": "plan.details.employeeCount < 100", "then": { "name": "small", "enrollmentMeetings": false } },
+        { "when": "plan.details.employeeCount < 1000", "then": { "name": "mid-market", "enrollmentMeetings": true } },
+        { "then": { "name": "large", "enrollmentMeetings": true } }
+      ]
+    }
+  ],
+  "outputs": [
+    { "name": "daysToEffective", "label": "Days until effective date", "expr": "isDate(plan.details.effectiveDate) ? daysBetween(today, plan.details.effectiveDate) : null", "format": "number" },
+    { "name": "qdiaCount", "label": "QDIA funds in lineup", "expr": "countWhere(plan.details.funds, 'qdia', true)", "format": "number" }
+  ],
+  "rules": [
+    { "id": "sponsor-name", "assert": "!isBlank(plan.details.sponsorName)", "message": "Sponsor name is missing" },
+    { "id": "ein-format", "assert": "matches(plan.details.ein, '^[0-9]{2}-[0-9]{7}$')", "message": "EIN \"{{plan.details.ein}}\" is not in NN-NNNNNNN format", "reference": "IRS EIN format" },
+    { "id": "employee-count", "assert": "isNumber(plan.details.employeeCount) and plan.details.employeeCount > 0", "message": "Employee count must be greater than 0" },
+    { "id": "effective-date", "assert": "isDate(plan.details.effectiveDate)", "message": "Effective date missing or not YYYY-MM-DD" },
+    { "id": "effective-date-future", "when": "isDate(plan.details.effectiveDate)", "assert": "outputs.daysToEffective >= 0", "message": "Effective date {{plan.details.effectiveDate}} is in the past" },
+    { "id": "plan-admin", "assert": "any(plan.details.contacts, 'role', 'PLAN_ADMINISTRATOR')", "message": "No plan administrator contact" },
+    {
+      "id": "plan-admin-email",
+      "when": "any(plan.details.contacts, 'role', 'PLAN_ADMINISTRATOR')",
+      "assert": "matches(find(plan.details.contacts, 'role', 'PLAN_ADMINISTRATOR').email, '^[^@ ]+@[^@ ]+[.][^@ ]+$')",
+      "message": "Plan administrator email is invalid"
+    },
+    { "id": "funds-present", "assert": "len(plan.details.funds) > 0", "message": "Fund lineup is empty" },
+    { "id": "one-qdia", "when": "len(plan.details.funds) > 0", "assert": "outputs.qdiaCount == 1", "message": "Fund lineup must have exactly one QDIA (found {{outputs.qdiaCount}})", "reference": "ERISA 404(c)(5) / 29 CFR 2550.404c-5" },
+    { "id": "unique-tickers", "when": "len(plan.details.funds) > 0", "assert": "!hasDuplicates(pluck(plan.details.funds, 'ticker'))", "message": "Fund lineup has duplicate tickers" },
+    { "id": "fees-present", "assert": "isNumber(plan.details.fees.recordkeepingBps)", "message": "Fee schedule missing" },
+    {
+      "id": "effective-date-lead-time",
+      "severity": "warning",
+      "when": "isDate(plan.details.effectiveDate) and outputs.daysToEffective >= 0",
+      "assert": "outputs.daysToEffective >= 45",
+      "message": "Effective date is only {{outputs.daysToEffective}} days away; installations usually need 45+ days for disclosures and payroll setup"
+    },
+    {
+      "id": "fee-outlier",
+      "severity": "warning",
+      "when": "isNumber(plan.details.fees.recordkeepingBps)",
+      "assert": "plan.details.fees.recordkeepingBps <= 25",
+      "message": "Recordkeeping fee of {{plan.details.fees.recordkeepingBps}} bps is unusually high; confirm against the signed fee schedule"
+    }
+  ],
+  "tests": [
+    {
+      "name": "clean mid-market plan passes",
+      "context": {
+        "today": "2026-11-05",
+        "plan": {
+          "details": {
+            "sponsorName": "Acme",
+            "ein": "12-3456789",
+            "employeeCount": 250,
+            "effectiveDate": "2027-01-01",
+            "contacts": [{ "role": "PLAN_ADMINISTRATOR", "name": "Jane", "email": "jane@acme.example" }],
+            "funds": [{ "ticker": "VFIAX" }, { "ticker": "VTTSX", "qdia": true }],
+            "fees": { "recordkeepingBps": 8 }
+          }
+        }
+      },
+      "expect": { "passed": true, "failing": [], "outputs": { "daysToEffective": 57, "qdiaCount": 1 }, "decisions": { "segment": { "name": "mid-market" } } }
+    },
+    {
+      "name": "bad EIN and two QDIAs fail; tight date warns",
+      "context": {
+        "today": "2026-11-05",
+        "plan": {
+          "details": {
+            "sponsorName": "Lumen",
+            "ein": "4590-1182",
+            "employeeCount": 64,
+            "effectiveDate": "2026-12-01",
+            "contacts": [{ "role": "PLAN_ADMINISTRATOR", "name": "Iris", "email": "iris@lumen.example" }],
+            "funds": [{ "ticker": "A", "qdia": true }, { "ticker": "B", "qdia": true }],
+            "fees": { "recordkeepingBps": 8 }
+          }
+        }
+      },
+      "expect": { "passed": false, "failing": ["ein-format", "one-qdia", "effective-date-lead-time"], "decisions": { "segment": { "name": "small", "enrollmentMeetings": false } } }
+    },
+    {
+      "name": "empty application reports every missing field once",
+      "context": { "today": "2026-11-05", "plan": { "details": { "sponsorName": "X", "ein": "", "employeeCount": 0, "effectiveDate": "", "contacts": [], "funds": [], "fees": {} } } },
+      "expect": { "passed": false, "failing": ["ein-format", "employee-count", "effective-date", "plan-admin", "funds-present", "fees-present"] }
+    }
+  ]
+}

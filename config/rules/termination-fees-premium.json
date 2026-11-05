@@ -1,0 +1,98 @@
+{
+  "id": "termination-fees-premium",
+  "version": 1,
+  "name": "Termination fee calculation (premium service model)",
+  "description": "Premium clients: deconversion fee waived per the premium service agreement. Otherwise identical to termination-fees.",
+  "outputs": [
+    {
+      "name": "participants",
+      "label": "Participants",
+      "expr": "plan.details.employeeCount",
+      "format": "number"
+    },
+    {
+      "name": "planAssetsUsd",
+      "label": "Plan assets",
+      "expr": "coalesce(plan.details.planAssetsUsd, 0)",
+      "format": "usd"
+    },
+    {
+      "name": "quarterStart",
+      "label": "Billing period start",
+      "expr": "quarterStart(request.effectiveDate)",
+      "format": "date"
+    },
+    {
+      "name": "prorationDays",
+      "label": "Days billed",
+      "expr": "max(0, daysBetween(outputs.quarterStart, request.effectiveDate))",
+      "format": "number"
+    },
+    {
+      "name": "baseFeeUsd",
+      "label": "Deconversion fee (waived)",
+      "expr": "0",
+      "format": "usd"
+    },
+    {
+      "name": "participantFeeUsd",
+      "label": "Participant fee (prorated)",
+      "expr": "round(plan.details.fees.perParticipantUsd * outputs.participants * outputs.prorationDays / 365, 2)",
+      "format": "usd"
+    },
+    {
+      "name": "assetFeeUsd",
+      "label": "Asset-based fee (prorated)",
+      "expr": "round(outputs.planAssetsUsd * plan.details.fees.recordkeepingBps / 10000 * outputs.prorationDays / 365, 2)",
+      "format": "usd"
+    },
+    {
+      "name": "totalUsd",
+      "label": "Total",
+      "expr": "round(outputs.baseFeeUsd + outputs.participantFeeUsd + outputs.assetFeeUsd, 2)",
+      "format": "usd"
+    }
+  ],
+  "rules": [
+    {
+      "id": "effective-date",
+      "assert": "isDate(request.effectiveDate)",
+      "message": "Termination effective date is missing or invalid"
+    },
+    {
+      "id": "assets-known",
+      "severity": "warning",
+      "assert": "outputs.planAssetsUsd > 0",
+      "message": "Plan assets are 0, so the asset-based fee is $0. Confirm the assets with the recordkeeper."
+    }
+  ],
+  "tests": [
+    {
+      "name": "deconversion fee waived",
+      "context": {
+        "plan": {
+          "details": {
+            "employeeCount": 250,
+            "planAssetsUsd": 12000000,
+            "fees": {
+              "recordkeepingBps": 8,
+              "perParticipantUsd": 40,
+              "terminationBaseUsd": 2500
+            }
+          }
+        },
+        "request": {
+          "effectiveDate": "2027-02-15"
+        }
+      },
+      "expect": {
+        "passed": true,
+        "failing": [],
+        "outputs": {
+          "baseFeeUsd": 0,
+          "totalUsd": 2416.44
+        }
+      }
+    }
+  ]
+}

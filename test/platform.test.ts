@@ -71,6 +71,7 @@ test('TRAC outage: install step goes to exception; retry is idempotent', () => {
   assert.equal(app.cases.completeTask(install.id, install.assigneeId!).status, 'DONE');
   assert.throws(() => app.cases.completeTask(install.id, install.assigneeId!), /is DONE/);
   assert.equal(app.trac.listPlans().length, 1);
+  workCase(app, kase.id); // remaining work, e.g. enrollment meetings for a 250-person plan
   assert.equal(app.repos.cases.require(kase.id).status, 'COMPLETED');
 });
 

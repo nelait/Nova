@@ -152,13 +152,15 @@ test('termination: fees calculated, notices sent, plan terminated on TRAC', () =
   const calc = app.cases.tasksFor(kase.id).find((t) => t.stepId === 'calculate-fees')!;
   assert.equal(calc.assigneeId, 'u_dana');
   const g = app.guidance.forTask(app.cases.contextFor(calc, 'u_dana'));
-  assert.equal(g.prepared?.kind, 'calculation');
-  if (g.prepared?.kind === 'calculation') {
+  assert.equal(g.prepared?.kind, 'rules');
+  if (g.prepared?.kind === 'rules') {
     // Q1 2027 start -> Feb 15 = 45 days. 12M * 8bps * 45/365 = 1183.56; 250 * $40 * 45/365 = 1232.88
-    assert.equal(g.prepared.result.prorationDays, 45);
-    assert.equal(g.prepared.result.assetFeeUsd, 1183.56);
-    assert.equal(g.prepared.result.participantFeeUsd, 1232.88);
-    assert.equal(g.prepared.result.totalUsd, 4916.44);
+    const o = g.prepared.result.outputs;
+    assert.equal(g.prepared.result.ruleSet, 'termination-fees');
+    assert.equal(o.prorationDays, 45);
+    assert.equal(o.assetFeeUsd, 1183.56);
+    assert.equal(o.participantFeeUsd, 1232.88);
+    assert.equal(o.totalUsd, 4916.44);
   }
 
   workCase(app, kase.id);

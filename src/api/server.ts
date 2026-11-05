@@ -6,6 +6,7 @@ import { NotFoundError, ValidationError } from '../store/db.ts';
 import { ActionError } from '../actions/executor.ts';
 import Anthropic from '@anthropic-ai/sdk';
 import { AiError } from '../ai/claudeAssist.ts';
+import { FUNCTIONS, RuleError } from '../rules/expression.ts';
 
 type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string }) => unknown;
 
@@ -70,6 +71,27 @@ route('GET', '/api/queue/unassigned', ({ app }) => app.cases.unassignedQueue());
 route('GET', '/api/tasks/:id/guidance', ({ app, params, actor }) => app.guidance.forTask(app.cases.contextFor(app.repos.tasks.require(params.id), actor)));
 route('POST', '/api/tasks/:id/start', ({ app, params, actor }) => app.cases.startTask(params.id, actor));
 route('POST', '/api/tasks/:id/complete', ({ app, params, body, actor }) => app.cases.completeTask(params.id, actor, body));
+// --- rules
+route('GET', '/api/rules', ({ app }) =>
+  app.kb.rules.list().map((r) => ({
+    id: r.id,
+    version: r.version,
+    name: r.name,
+    description: r.description ?? '',
+    counts: { decisions: r.decisions?.length ?? 0, outputs: r.outputs?.length ?? 0, rules: r.rules?.length ?? 0, tests: r.tests?.length ?? 0 },
+    usedBy: app.kb.listPlaybooks().flatMap((p) => p.steps.filter((s) => s.action.type === 'rules.evaluate' && s.action.params?.ruleSet === r.id).map((s) => `${p.caseType} / ${s.id}`)),
+    overriddenBy: app.kb.listClients().filter((c) => Object.values(c.ruleSetOverrides ?? {}).includes(r.id)).map((c) => c.clientId),
+  })),
+);
+route('GET', '/api/rules/functions', () => Object.entries(FUNCTIONS).map(([name, f]) => ({ name, doc: f.doc })));
+route('GET', '/api/rules/:id', ({ app, params }) => app.kb.rules.get(params.id));
+route('POST', '/api/rules/:id/test', ({ app, params }) => app.kb.rules.test(params.id));
+route('POST', '/api/rules/:id/evaluate', ({ app, params, body }) => {
+  // Evaluate against a live case (read-only) or a context supplied by the caller.
+  const context = body.caseId ? app.cases.ruleContextForCase(String(body.caseId)) : (body.context ?? {});
+  return { context, result: app.kb.rules.evaluate(params.id, context) };
+});
+
 route('GET', '/api/ai/status', ({ app }) => ({ enabled: app.ai.enabled, model: app.ai.model }));
 route('GET', '/api/tasks/:id/ai-assist', ({ app, params, actor }) => app.ai.cached(params.id, actor));
 route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor }) => app.ai.assist(params.id, actor, !!body.refresh));
@@ -119,7 +141,7 @@ export function startServer(app: App, port: number, publicDir: string) {
       res.end(data);
     } catch (e) {
       if (e instanceof NotFoundError || (e as NodeJS.ErrnoException).code === 'ENOENT') return send(res, 404, { error: (e as Error).message });
-      if (e instanceof ValidationError || e instanceof ActionError || e instanceof SyntaxError) {
+      if (e instanceof ValidationError || e instanceof ActionError || e instanceof SyntaxError || e instanceof RuleError) {
         return send(res, 422, { error: (e as Error).message, issues: (e as ValidationError).issues ?? [] });
       }
       if (e instanceof AiError) return send(res, 503, { error: e.message });

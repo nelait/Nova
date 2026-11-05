@@ -1,0 +1,33 @@
+{
+  "id": "fee-change",
+  "version": 1,
+  "name": "Fee change checks",
+  "outputs": [
+    { "name": "bpsChange", "label": "Change in recordkeeping fee (bps)", "expr": "isNumber(request.fees.recordkeepingBps) and isNumber(plan.details.fees.recordkeepingBps) ? request.fees.recordkeepingBps - plan.details.fees.recordkeepingBps : null", "format": "number" }
+  ],
+  "rules": [
+    { "id": "fees-present", "assert": "!isBlank(request.fees)", "message": "Request has no fee schedule" },
+    { "id": "recordkeeping-bps", "when": "!isBlank(request.fees)", "assert": "isNumber(request.fees.recordkeepingBps) and request.fees.recordkeepingBps >= 0", "message": "Fee \"recordkeepingBps\" missing or negative" },
+    { "id": "per-participant", "when": "!isBlank(request.fees)", "assert": "isNumber(request.fees.perParticipantUsd) and request.fees.perParticipantUsd >= 0", "message": "Fee \"perParticipantUsd\" missing or negative" },
+    { "id": "termination-base", "when": "!isBlank(request.fees)", "assert": "isNumber(request.fees.terminationBaseUsd) and request.fees.terminationBaseUsd >= 0", "message": "Fee \"terminationBaseUsd\" missing or negative" },
+    {
+      "id": "large-increase",
+      "severity": "warning",
+      "when": "outputs.bpsChange != null",
+      "assert": "outputs.bpsChange <= 5",
+      "message": "Recordkeeping fee rises by {{outputs.bpsChange}} bps; confirm the sponsor has agreed to the increase in writing"
+    }
+  ],
+  "tests": [
+    {
+      "name": "reduction passes",
+      "context": { "plan": { "details": { "fees": { "recordkeepingBps": 8 } } }, "request": { "fees": { "recordkeepingBps": 6, "perParticipantUsd": 36, "terminationBaseUsd": 2500 } } },
+      "expect": { "passed": true, "failing": [], "outputs": { "bpsChange": -2 } }
+    },
+    {
+      "name": "missing field fails, big increase warns",
+      "context": { "plan": { "details": { "fees": { "recordkeepingBps": 8 } } }, "request": { "fees": { "recordkeepingBps": 20, "perParticipantUsd": 36 } } },
+      "expect": { "passed": false, "failing": ["termination-base", "large-increase"] }
+    }
+  ]
+}

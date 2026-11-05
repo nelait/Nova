@@ -1,0 +1,42 @@
+{
+  "id": "fund-change",
+  "version": 1,
+  "name": "Fund lineup change checks",
+  "outputs": [
+    { "name": "daysToEffective", "label": "Days until effective date", "expr": "isDate(request.effectiveDate) ? daysBetween(today, request.effectiveDate) : null", "format": "number" },
+    { "name": "qdiaCount", "label": "QDIA funds in new lineup", "expr": "countWhere(request.funds, 'qdia', true)", "format": "number" }
+  ],
+  "rules": [
+    { "id": "funds-present", "assert": "len(request.funds) > 0", "message": "Fund lineup is empty" },
+    { "id": "one-qdia", "when": "len(request.funds) > 0", "assert": "outputs.qdiaCount == 1", "message": "Fund lineup must have exactly one QDIA (found {{outputs.qdiaCount}})" },
+    { "id": "unique-tickers", "when": "len(request.funds) > 0", "assert": "!hasDuplicates(pluck(request.funds, 'ticker'))", "message": "Fund lineup has duplicate tickers" },
+    { "id": "effective-date", "assert": "isDate(request.effectiveDate)", "message": "Effective date missing or not YYYY-MM-DD" },
+    {
+      "id": "notice-window",
+      "when": "isDate(request.effectiveDate)",
+      "assert": "outputs.daysToEffective >= 30",
+      "message": "Effective date is less than 30 days away; the required participant notice cannot be given in time",
+      "reference": "ERISA 404(c)(4)(C)"
+    },
+    {
+      "id": "notice-window-max",
+      "severity": "warning",
+      "when": "isDate(request.effectiveDate)",
+      "assert": "outputs.daysToEffective <= 60",
+      "message": "Effective date is {{outputs.daysToEffective}} days away; the notice must go out no more than 60 days before, so schedule it rather than sending now",
+      "reference": "ERISA 404(c)(4)(C)"
+    }
+  ],
+  "tests": [
+    {
+      "name": "valid change 45 days out",
+      "context": { "today": "2026-11-05", "request": { "effectiveDate": "2026-12-20", "funds": [{ "ticker": "A" }, { "ticker": "B", "qdia": true }] } },
+      "expect": { "passed": true, "failing": [], "outputs": { "daysToEffective": 45 } }
+    },
+    {
+      "name": "too soon fails",
+      "context": { "today": "2026-11-05", "request": { "effectiveDate": "2026-11-20", "funds": [{ "ticker": "A", "qdia": true }] } },
+      "expect": { "passed": false, "failing": ["notice-window"] }
+    }
+  ]
+}

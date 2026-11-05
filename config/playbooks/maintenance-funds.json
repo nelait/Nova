@@ -10,7 +10,7 @@
       "name": "Validate fund change request",
       "skill": "MAINTENANCE",
       "mode": "AUTO",
-      "action": { "type": "compliance.check", "params": { "ruleset": "fund-change" } },
+      "action": { "type": "rules.evaluate", "params": { "ruleSet": "fund-change" } },
       "slaHours": 4,
       "guidance": "The new lineup must be complete, keep exactly one QDIA, and give an effective date."
     },

@@ -10,7 +10,7 @@
       "name": "Validate fee change request",
       "skill": "MAINTENANCE",
       "mode": "AUTO",
-      "action": { "type": "compliance.check", "params": { "ruleset": "fee-change" } },
+      "action": { "type": "rules.evaluate", "params": { "ruleSet": "fee-change" } },
       "guidance": "The request must contain a complete fee schedule."
     },
     {

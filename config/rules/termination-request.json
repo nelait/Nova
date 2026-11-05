@@ -1,0 +1,47 @@
+{
+  "id": "termination-request",
+  "version": 1,
+  "name": "Termination request checks",
+  "outputs": [
+    { "name": "daysToEffective", "label": "Days until effective date", "expr": "isDate(request.effectiveDate) ? daysBetween(today, request.effectiveDate) : null", "format": "number" },
+    { "name": "daysToBlackout", "label": "Days until blackout starts", "expr": "isDate(request.blackoutStart) ? daysBetween(today, request.blackoutStart) : null", "format": "number" }
+  ],
+  "rules": [
+    { "id": "reason", "assert": "!isBlank(request.reason)", "message": "Termination reason missing" },
+    { "id": "successor", "assert": "!isBlank(request.successorProvider)", "message": "Successor provider missing" },
+    { "id": "effective-date", "assert": "isDate(request.effectiveDate)", "message": "Effective date missing or not YYYY-MM-DD" },
+    {
+      "id": "notice-window",
+      "when": "isDate(request.effectiveDate)",
+      "assert": "outputs.daysToEffective >= 30",
+      "message": "Effective date is less than 30 days away; the 30-day blackout notice cannot be met",
+      "reference": "ERISA 101(i)"
+    },
+    {
+      "id": "blackout-order",
+      "when": "isDate(request.blackoutStart) and isDate(request.blackoutEnd)",
+      "assert": "request.blackoutEnd >= request.blackoutStart",
+      "message": "Blackout end is before blackout start"
+    },
+    {
+      "id": "blackout-notice-time",
+      "severity": "warning",
+      "when": "isDate(request.blackoutStart)",
+      "assert": "outputs.daysToBlackout >= 30",
+      "message": "Blackout starts in {{outputs.daysToBlackout}} days; participants must get at least 30 days' notice",
+      "reference": "ERISA 101(i) / 29 CFR 2520.101-3"
+    }
+  ],
+  "tests": [
+    {
+      "name": "complete request passes",
+      "context": { "today": "2026-11-05", "request": { "reason": "x", "successorProvider": "y", "effectiveDate": "2027-02-15", "blackoutStart": "2027-02-10", "blackoutEnd": "2027-03-05" } },
+      "expect": { "passed": true, "failing": [] }
+    },
+    {
+      "name": "too soon fails; tight blackout warns",
+      "context": { "today": "2026-11-05", "request": { "reason": "x", "successorProvider": "y", "effectiveDate": "2026-11-20", "blackoutStart": "2026-11-15", "blackoutEnd": "2026-11-10" } },
+      "expect": { "passed": false, "failing": ["notice-window", "blackout-order", "blackout-notice-time"] }
+    }
+  ]
+}

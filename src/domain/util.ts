@@ -24,7 +24,7 @@ export function getPath(obj: unknown, path: string): unknown {
 
 /** Tiny mustache-style renderer: {{path.to.value}}. Missing values render as [MISSING:path]. */
 export function render(template: string, ctx: unknown): string {
-  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, path: string) => {
+  return template.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m, path: string) => {
     const v = getPath(ctx, path);
     return v === undefined || v === null || v === '' ? `[MISSING:${path}]` : String(v);
   });

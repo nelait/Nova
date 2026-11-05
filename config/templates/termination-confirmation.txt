@@ -5,10 +5,10 @@ Dear {{recipient.name}},
 We confirm that recordkeeping services for the {{plan.details.sponsorName}} plan end effective {{request.effectiveDate}}. Assets will be transferred to {{request.successorProvider}}.
 
 Final fees:
-  - Deconversion fee: ${{termination.baseFeeUsd}}
-  - Participant fee ({{termination.participants}} participants): ${{termination.participantFeeUsd}}
-  - Prorated asset-based fee ({{termination.prorationDays}} days): ${{termination.assetFeeUsd}}
-  - Total: ${{termination.totalUsd}}
+  - Deconversion fee: ${{steps.calculate-fees.outputs.baseFeeUsd}}
+  - Participant fee ({{steps.calculate-fees.outputs.participants}} participants): ${{steps.calculate-fees.outputs.participantFeeUsd}}
+  - Prorated asset-based fee ({{steps.calculate-fees.outputs.prorationDays}} days): ${{steps.calculate-fees.outputs.assetFeeUsd}}
+  - Total: ${{steps.calculate-fees.outputs.totalUsd}}
 
 Kind regards,
 Plan Services Team

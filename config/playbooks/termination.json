@@ -10,7 +10,7 @@
       "name": "Validate termination request",
       "skill": "TERMINATIONS",
       "mode": "AUTO",
-      "action": { "type": "compliance.check", "params": { "ruleset": "termination" } },
+      "action": { "type": "rules.evaluate", "params": { "ruleSet": "termination-request" } },
       "slaHours": 4,
       "guidance": "Must include reason, requested effective date and successor provider (if deconverting)."
     },
@@ -31,7 +31,7 @@
       "skill": "TERMINATIONS",
       "minSkillLevel": 2,
       "mode": "REVIEW",
-      "action": { "type": "fees.calculateTermination" },
+      "action": { "type": "rules.evaluate", "params": { "ruleSet": "termination-fees" } },
       "dependsOn": ["validate-request"],
       "slaHours": 24,
       "guidance": "Calculates the flat deconversion fee, the per-participant fee and the asset-based fee prorated to the effective date. Check the result against the contract before it is quoted to the sponsor."

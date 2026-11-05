@@ -10,7 +10,7 @@
       "name": "Validate contact change request",
       "skill": "MAINTENANCE",
       "mode": "AUTO",
-      "action": { "type": "compliance.check", "params": { "ruleset": "contact-change" } },
+      "action": { "type": "rules.evaluate", "params": { "ruleSet": "contact-change" } },
       "slaHours": 4,
       "guidance": "The request must include the role, name and email of the new contact."
     },

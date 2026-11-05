@@ -55,6 +55,7 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
 | 8 | Audit | `audit` table, written by `CaseService.save` |
 | 9 | Insights / learning loop | `src/learning/insights.ts` |
 | 10 | Claude assistance (optional) | `src/ai/claudeAssist.ts` |
+| 11 | Rules engine: decision tables, calculations, validations | `src/rules/`, `config/rules/` ([RULES.md](RULES.md)) |
 
 ## Key design decisions
 
@@ -111,10 +112,20 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
      from Claude, and measures edits against that draft. Insights reports both edit
      rates and suggests template or prompt reviews.
 
+8. **Business rules are configuration.** Validations, fee calculations and
+   decision tables live in versioned rule sets (`config/rules/`), written in a
+   small, safe expression language that is checked at startup. A rule set runs as
+   a playbook step (`rules.evaluate`). Its result is stored on the task, later
+   steps can read it (`steps['id'].outputs…`), and any step can be made
+   conditional on it with `when` (false means skipped and audited; an error goes
+   to a person). Each rule set carries test cases that `npm test` runs. Clients
+   can swap a rule set via `ruleSetOverrides`. See [RULES.md](RULES.md).
+
 ## Task state machine
 
 ```
-BLOCKED ──deps done──► READY ──(AUTO)──► run ──ok──► DONE
+BLOCKED ──deps done──► (step `when` false ─► SKIPPED)
+                         READY ──(AUTO)──► run ──ok──► DONE
                          │                  └─fail─► READY + exception ─► routed to a person
                          ├──(REVIEW/MANUAL)─► routed ─► IN_PROGRESS ─► DONE
                          └── no eligible user ─► stays in skill queue; re-routed when

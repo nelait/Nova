@@ -77,11 +77,10 @@ export interface Case {
 }
 
 export type ActionType =
-  | 'compliance.check'
+  | 'rules.evaluate'
   | 'contacts.upsert'
   | 'funds.apply'
   | 'fees.apply'
-  | 'fees.calculateTermination'
   | 'email.send'
   | 'trac.installPlan'
   | 'trac.updatePlan'
@@ -101,6 +100,12 @@ export interface PlaybookStep {
   mode: Mode;
   action: ActionSpec;
   dependsOn?: string[];
+  /**
+   * Optional condition (rule expression). When it is false once the step's
+   * dependencies are done, the step is skipped. Can read plan, request, case,
+   * steps (earlier results), today and client.
+   */
+  when?: string;
   slaHours?: number;
   guidance: string;
   checklist?: string[];
@@ -203,4 +208,5 @@ export interface ClientConfig {
     >
   >;
   templateOverrides?: Record<string, string>; // template name -> template file in config/templates
+  ruleSetOverrides?: Record<string, string>; // rule set id -> client-specific rule set id
 }

@@ -3,7 +3,9 @@ import { addHours, newId, type Clock } from '../domain/util.ts';
 import { Collection, ValidationError } from '../store/db.ts';
 import type { KnowledgeBase } from '../knowledge/knowledgeBase.ts';
 import { normalizeIntake, type IntakeSubmission } from '../intake/intake.ts';
-import { ActionError, type ActionContext, type ActionExecutor, type Edits } from '../actions/executor.ts';
+import { ActionError, ruleContext, type ActionContext, type ActionExecutor, type Edits } from '../actions/executor.ts';
+import { compile } from '../rules/expression.ts';
+import { STEP_CONDITION_ROOTS } from '../rules/ruleEngine.ts';
 import type { RecordkeeperAdapter } from '../integrations/recordkeeper.ts';
 import { routeTask } from '../routing/skillRouter.ts';
 import type { UserDirectory } from '../users/userDirectory.ts';
@@ -22,6 +24,15 @@ export interface CompleteInput {
   override?: boolean;
   /** Which draft the user started from when editing an email. */
   draftSource?: 'template' | 'ai';
+}
+
+/** Rule results are large (outputs, trace); the audit log keeps a summary. The task keeps the full result. */
+function auditSummary(result: unknown): unknown {
+  if (result && typeof result === 'object' && 'ruleSet' in result && 'issues' in result) {
+    const r = result as { ruleSet: string; version: number; passed: boolean; issues: { ruleId: string; severity: string }[] };
+    return { ruleSet: `${r.ruleSet}@v${r.version}`, passed: r.passed, issues: r.issues.map((i) => `${i.severity}:${i.ruleId}`) };
+  }
+  return result;
 }
 
 export type DraftLookup = (taskId: string) => { subject: string; body: string } | undefined;
@@ -174,8 +185,22 @@ export class CaseService {
 
       for (const t of tasks.filter((t) => t.status === 'BLOCKED' && t.dependsOn.every((d) => doneSteps.has(d)))) {
         const step = this.kb.playbookFor(this.r.cases.require(caseId).type, this.r.cases.require(caseId).clientId).steps.find((s) => s.id === t.stepId);
-        this.save(t, { status: 'READY', readyAt: this.now(), dueAt: step?.slaHours ? addHours(this.now(), step.slaHours) : undefined }, 'system', 'ready');
         progressed = true;
+        if (step?.when) {
+          let applies: boolean;
+          try {
+            applies = compile(step.when, STEP_CONDITION_ROOTS).test(ruleContext(this.contextFor(t, 'system')));
+          } catch (e) {
+            // A broken condition must not silently skip or run a step: a person decides.
+            this.save(t, { status: 'READY', readyAt: this.now(), exception: `Step condition could not be evaluated: ${(e as Error).message}` }, 'system', 'condition-failed');
+            continue;
+          }
+          if (!applies) {
+            this.save(t, { status: 'SKIPPED', completedAt: this.now() }, 'system', 'skipped', { condition: step.when });
+            continue;
+          }
+        }
+        this.save(t, { status: 'READY', readyAt: this.now(), dueAt: step?.slaHours ? addHours(this.now(), step.slaHours) : undefined }, 'system', 'ready');
       }
 
       for (const t of this.tasksFor(caseId).filter((t) => t.status === 'READY' && t.mode === 'AUTO' && !t.exception)) {
@@ -192,7 +217,7 @@ export class CaseService {
     try {
       const outcome = this.exec.execute(this.contextFor(task, 'system'));
       if (outcome.plan) this.r.plans.update({ ...outcome.plan, updatedAt: this.now() });
-      this.save(task, { status: 'DONE', result: outcome.result, completedAt: this.now() }, 'system', 'auto-completed', outcome.result);
+      this.save(task, { status: 'DONE', result: outcome.result, completedAt: this.now() }, 'system', 'auto-completed', auditSummary(outcome.result));
     } catch (e) {
       const issues = e instanceof ActionError ? e.issues : [];
       // Automation failed: hand the step to a person instead of stalling the case.
@@ -289,7 +314,7 @@ export class CaseService {
           { status: 'DONE', completedAt: this.now(), result: outcome.result, draftEdited, draftSource, exception: undefined },
           userId,
           'executed',
-          { result: outcome.result, draftEdited, draftSource, notes: input.notes },
+          { result: auditSummary(outcome.result), draftEdited, draftSource, notes: input.notes },
         );
       } catch (e) {
         const issues = e instanceof ActionError ? e.issues : [];
@@ -341,6 +366,14 @@ export class CaseService {
 
   unassignedQueue(): Task[] {
     return this.r.tasks.find((t) => t.status === 'READY' && !t.assigneeId && this.needsHuman(t));
+  }
+
+  /** The data rules see for a case right now (completed step results included). */
+  ruleContextForCase(caseId: string): Record<string, unknown> {
+    const kase = this.r.cases.require(caseId);
+    const stepResults: Record<string, unknown> = {};
+    for (const t of this.tasksFor(caseId)) if (t.status === 'DONE') stepResults[t.stepId] = t.result;
+    return ruleContext({ kase, plan: this.r.plans.require(kase.planId), stepResults, today: this.clock.now() });
   }
 
   contextFor(task: Task, actor: string): ActionContext {

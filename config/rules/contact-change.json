@@ -1,0 +1,46 @@
+{
+  "id": "contact-change",
+  "version": 1,
+  "name": "Contact change checks",
+  "outputs": [
+    { "name": "currentDomain", "label": "Plan administrator's email domain", "expr": "emailDomain(find(plan.details.contacts, 'role', 'PLAN_ADMINISTRATOR').email)" },
+    { "name": "newDomain", "label": "New contact's email domain", "expr": "emailDomain(request.contact.email)" }
+  ],
+  "rules": [
+    { "id": "contact-present", "assert": "!isBlank(request.contact)", "message": "Request has no contact" },
+    { "id": "role", "when": "!isBlank(request.contact)", "assert": "request.contact.role in ['PLAN_ADMINISTRATOR', 'PAYROLL', 'TRUSTEE', 'HR']", "message": "Unknown contact role \"{{request.contact.role}}\"" },
+    { "id": "name", "when": "!isBlank(request.contact)", "assert": "!isBlank(request.contact.name)", "message": "Contact name missing" },
+    { "id": "email", "when": "!isBlank(request.contact)", "assert": "matches(request.contact.email, '^[^@ ]+@[^@ ]+[.][^@ ]+$')", "message": "Contact email invalid" },
+    {
+      "id": "email-domain",
+      "severity": "warning",
+      "when": "outputs.currentDomain != null and outputs.newDomain != null",
+      "assert": "outputs.newDomain == outputs.currentDomain",
+      "message": "New contact uses {{outputs.newDomain}}, not the sponsor's domain {{outputs.currentDomain}}. Treat as a possible fraud attempt until the call-back is done.",
+      "reference": "Firm fraud-prevention policy"
+    }
+  ],
+  "tests": [
+    {
+      "name": "same-domain change passes cleanly",
+      "context": {
+        "plan": { "details": { "contacts": [{ "role": "PLAN_ADMINISTRATOR", "email": "jane@acme.example" }] } },
+        "request": { "contact": { "role": "PLAN_ADMINISTRATOR", "name": "Omar", "email": "omar@acme.example" } }
+      },
+      "expect": { "passed": true, "failing": [] }
+    },
+    {
+      "name": "free-mail address warns",
+      "context": {
+        "plan": { "details": { "contacts": [{ "role": "PLAN_ADMINISTRATOR", "email": "grace@orchardlane.example" }] } },
+        "request": { "contact": { "role": "PLAN_ADMINISTRATOR", "name": "G. Liu", "email": "grace.liu@freemail.example" } }
+      },
+      "expect": { "passed": true, "failing": ["email-domain"] }
+    },
+    {
+      "name": "bad role and email fail",
+      "context": { "plan": { "details": { "contacts": [] } }, "request": { "contact": { "role": "CEO", "name": "", "email": "nope" } } },
+      "expect": { "passed": false, "failing": ["role", "name", "email"] }
+    }
+  ]
+}

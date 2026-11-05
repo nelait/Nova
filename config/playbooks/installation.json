@@ -10,7 +10,7 @@
       "name": "Validate onboarding data",
       "skill": "PLAN_SETUP",
       "mode": "AUTO",
-      "action": { "type": "compliance.check", "params": { "ruleset": "installation" } },
+      "action": { "type": "rules.evaluate", "params": { "ruleSet": "installation-intake" } },
       "slaHours": 4,
       "guidance": "Every required plan attribute must be present and well-formed before any outbound communication. If this check fails, it is routed to a plan setup specialist to fix the data with the sponsor.",
       "checklist": ["EIN format NN-NNNNNNN", "At least one plan administrator with email", "Fund lineup has exactly one QDIA", "Fee schedule present"]
@@ -70,6 +70,18 @@
       "dependsOn": ["setup-contacts", "verify-sponsor"],
       "slaHours": 24,
       "guidance": "Introduce the service team, next steps and key dates. Personalise if the sponsor has special instructions."
+    },
+    {
+      "id": "enrollment-meetings",
+      "name": "Schedule participant enrollment meetings",
+      "skill": "PLAN_SETUP",
+      "mode": "MANUAL",
+      "action": { "type": "none" },
+      "dependsOn": ["welcome-email"],
+      "when": "steps['validate-intake'].decisions.segment.enrollmentMeetings == true",
+      "slaHours": 72,
+      "guidance": "Mid-market and large plans get on-site or virtual enrollment meetings before the effective date. The onboarding rules decide which plans need them; small plans skip this step.",
+      "checklist": ["Dates agreed with HR", "Meeting invites sent to employees"]
     },
     {
       "id": "trac-install",

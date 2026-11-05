@@ -1,7 +1,7 @@
 import type { Case, Contact, FeeSchedule, Fund, Plan, Task } from '../domain/types.ts';
 import { getPath, newId, render } from '../domain/util.ts';
 import type { KnowledgeBase } from '../knowledge/knowledgeBase.ts';
-import { RULESETS } from '../intake/rules.ts';
+import type { RuleResult } from '../rules/ruleEngine.ts';
 import type { RecordkeeperAdapter } from '../integrations/recordkeeper.ts';
 import type { EmailGateway } from '../integrations/email.ts';
 
@@ -15,20 +15,22 @@ export interface ActionContext {
   today: Date;
 }
 
-export interface TerminationFees {
-  participants: number;
-  planAssetsUsd: number;
-  prorationDays: number;
-  baseFeeUsd: number;
-  participantFeeUsd: number;
-  assetFeeUsd: number;
-  totalUsd: number;
-  basis: string;
+/** The data rule expressions and step conditions can read. */
+export function ruleContext(ctx: Pick<ActionContext, 'kase' | 'plan' | 'stepResults' | 'today'>): Record<string, unknown> {
+  const { kase, plan } = ctx;
+  return {
+    plan: { id: plan.id, status: plan.status, tracPlanId: plan.tracPlanId ?? null, details: plan.details },
+    request: kase.request,
+    case: { id: kase.id, type: kase.type, channel: kase.channel, clientId: kase.clientId },
+    steps: ctx.stepResults,
+    today: ctx.today.toISOString().slice(0, 10),
+    client: kase.clientId,
+  };
 }
 
 /** What a step WILL do, shown to the user before anything leaves the building. */
 export type PreparedAction =
-  | { kind: 'check'; issues: string[] }
+  | { kind: 'rules'; result: RuleResult }
   | {
       kind: 'email';
       template: string;
@@ -40,7 +42,6 @@ export type PreparedAction =
       requiredFacts: string[];
     }
   | { kind: 'system-update'; target: string; operation: string; payload: unknown }
-  | { kind: 'calculation'; result: TerminationFees }
   | { kind: 'manual' };
 
 export interface Edits {
@@ -82,10 +83,9 @@ export class ActionExecutor {
     const { task, kase, plan } = ctx;
     const p = task.action.params ?? {};
     switch (task.action.type) {
-      case 'compliance.check': {
-        const rules = RULESETS[String(p.ruleset)];
-        if (!rules) return { kind: 'check', issues: [`Unknown ruleset ${String(p.ruleset)}`] };
-        return { kind: 'check', issues: rules(plan, kase.request, ctx.today) };
+      case 'rules.evaluate': {
+        const id = this.kb.ruleSetFor(String(p.ruleSet), kase.clientId);
+        return { kind: 'rules', result: this.kb.rules.evaluate(id, ruleContext(ctx)) };
       }
       case 'email.send':
         return this.prepareEmail(ctx);
@@ -105,8 +105,6 @@ export class ActionExecutor {
         };
       case 'fees.apply':
         return { kind: 'system-update', target: this.rk.name, operation: 'set fee schedule', payload: kase.request.fees };
-      case 'fees.calculateTermination':
-        return { kind: 'calculation', result: calculateTerminationFees(plan, String(kase.request.effectiveDate ?? '')) };
       case 'trac.installPlan':
         return { kind: 'system-update', target: this.rk.name, operation: 'install plan', payload: plan.details };
       case 'trac.terminatePlan':
@@ -128,10 +126,11 @@ export class ActionExecutor {
     const prepared = this.prepare(ctx);
 
     switch (task.action.type) {
-      case 'compliance.check': {
-        const issues = (prepared as { issues: string[] }).issues;
-        if (issues.length) throw new ActionError(`Validation failed: ${issues.length} issue(s)`, issues);
-        return { result: { passed: true } };
+      case 'rules.evaluate': {
+        const r = (prepared as { result: RuleResult }).result;
+        const errors = r.issues.filter((i) => i.severity === 'error').map((i) => i.message);
+        if (!r.passed) throw new ActionError(`Validation failed: ${errors.length} issue(s)`, errors);
+        return { result: r };
       }
 
       case 'email.send': {
@@ -181,9 +180,6 @@ export class ActionExecutor {
         return { result: { fees }, plan: { ...plan, details: { ...plan.details, fees } } };
       }
 
-      case 'fees.calculateTermination':
-        return { result: (prepared as { result: TerminationFees }).result };
-
       case 'trac.installPlan': {
         const rk = this.rk.installPlan(plan, key);
         return { result: { tracPlanId: rk.id, version: rk.version }, plan: { ...plan, tracPlanId: rk.id } };
@@ -226,7 +222,7 @@ export class ActionExecutor {
       request: { ...kase.request, lineupText: funds.map((f) => `  - ${f.ticker} ${f.name}${f.qdia ? ' (default/QDIA)' : ''}`).join('\n') },
       recipient: toContacts[0] ?? { name: 'Plan Sponsor' },
       fees: p.useRequestFees ? kase.request.fees : plan.details.fees,
-      termination: Object.values(ctx.stepResults).find((r) => r && typeof r === 'object' && 'totalUsd' in r),
+      steps: ctx.stepResults,
     };
     return {
       kind: 'email',
@@ -247,7 +243,7 @@ export class ActionExecutor {
  */
 export function requiredFacts(template: string, ctx: unknown, funds: Fund[]): string[] {
   const facts = new Set<string>();
-  for (const [, path] of template.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)) {
+  for (const [, path] of template.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)) {
     if (path.startsWith('recipient.')) continue;
     if (path === 'request.lineupText') {
       funds.forEach((f) => facts.add(f.ticker));
@@ -264,34 +260,4 @@ export function missingFacts(facts: string[], text: string): string[] {
   const norm = (x: string) => x.replace(/(\d),(?=\d{3})/g, '$1').toLowerCase();
   const hay = norm(text);
   return facts.filter((f) => !hay.includes(norm(f)));
-}
-
-/**
- * Illustrative fee model (replace with the contract's actual terms):
- * fees are billed quarterly in arrears, so the final bill prorates the asset-based
- * and per-participant fees from the start of the quarter to the effective date,
- * plus a flat deconversion fee.
- */
-export function calculateTerminationFees(plan: Plan, effectiveDate: string): TerminationFees {
-  const eff = new Date(effectiveDate);
-  if (Number.isNaN(eff.getTime())) throw new ActionError('Termination effective date is invalid');
-  const qStart = new Date(Date.UTC(eff.getUTCFullYear(), Math.floor(eff.getUTCMonth() / 3) * 3, 1));
-  const days = Math.max(0, Math.round((eff.getTime() - qStart.getTime()) / 86_400_000));
-  const fees = plan.details.fees;
-  const participants = plan.details.employeeCount;
-  const assets = plan.details.planAssetsUsd ?? 0;
-  const cents = (n: number) => Math.round(n * 100) / 100;
-  const assetFeeUsd = cents(((assets * fees.recordkeepingBps) / 10_000) * (days / 365));
-  const participantFeeUsd = cents(fees.perParticipantUsd * participants * (days / 365));
-  const baseFeeUsd = fees.terminationBaseUsd;
-  return {
-    participants,
-    planAssetsUsd: assets,
-    prorationDays: days,
-    baseFeeUsd,
-    participantFeeUsd,
-    assetFeeUsd,
-    totalUsd: cents(baseFeeUsd + participantFeeUsd + assetFeeUsd),
-    basis: `Quarter-to-date proration from ${qStart.toISOString().slice(0, 10)} (${days} days) at ${fees.recordkeepingBps} bps and $${fees.perParticipantUsd}/participant/yr, plus $${baseFeeUsd} deconversion fee`,
-  };
 }

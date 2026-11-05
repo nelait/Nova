@@ -1,0 +1,38 @@
+{
+  "id": "termination-fees",
+  "version": 1,
+  "name": "Termination fee calculation",
+  "description": "Illustrative fee model; replace with the contract's terms. Fees are billed quarterly in arrears, so the final bill prorates the asset-based and per-participant fees from the start of the quarter to the effective date, plus a flat deconversion fee.",
+  "outputs": [
+    { "name": "participants", "label": "Participants", "expr": "plan.details.employeeCount", "format": "number" },
+    { "name": "planAssetsUsd", "label": "Plan assets", "expr": "coalesce(plan.details.planAssetsUsd, 0)", "format": "usd" },
+    { "name": "quarterStart", "label": "Billing period start", "expr": "quarterStart(request.effectiveDate)", "format": "date" },
+    { "name": "prorationDays", "label": "Days billed", "expr": "max(0, daysBetween(outputs.quarterStart, request.effectiveDate))", "format": "number" },
+    { "name": "baseFeeUsd", "label": "Deconversion fee", "expr": "plan.details.fees.terminationBaseUsd", "format": "usd" },
+    { "name": "participantFeeUsd", "label": "Participant fee (prorated)", "expr": "round(plan.details.fees.perParticipantUsd * outputs.participants * outputs.prorationDays / 365, 2)", "format": "usd" },
+    { "name": "assetFeeUsd", "label": "Asset-based fee (prorated)", "expr": "round(outputs.planAssetsUsd * plan.details.fees.recordkeepingBps / 10000 * outputs.prorationDays / 365, 2)", "format": "usd" },
+    { "name": "totalUsd", "label": "Total", "expr": "round(outputs.baseFeeUsd + outputs.participantFeeUsd + outputs.assetFeeUsd, 2)", "format": "usd" }
+  ],
+  "rules": [
+    { "id": "effective-date", "assert": "isDate(request.effectiveDate)", "message": "Termination effective date is missing or invalid" },
+    { "id": "assets-known", "severity": "warning", "assert": "outputs.planAssetsUsd > 0", "message": "Plan assets are 0, so the asset-based fee is $0. Confirm the assets with the recordkeeper." }
+  ],
+  "tests": [
+    {
+      "name": "mid-quarter termination",
+      "context": {
+        "plan": { "details": { "employeeCount": 250, "planAssetsUsd": 12000000, "fees": { "recordkeepingBps": 8, "perParticipantUsd": 40, "terminationBaseUsd": 2500 } } },
+        "request": { "effectiveDate": "2027-02-15" }
+      },
+      "expect": { "passed": true, "failing": [], "outputs": { "quarterStart": "2027-01-01", "prorationDays": 45, "participantFeeUsd": 1232.88, "assetFeeUsd": 1183.56, "totalUsd": 4916.44 } }
+    },
+    {
+      "name": "unknown assets warns but still calculates",
+      "context": {
+        "plan": { "details": { "employeeCount": 10, "fees": { "recordkeepingBps": 8, "perParticipantUsd": 40, "terminationBaseUsd": 2500 } } },
+        "request": { "effectiveDate": "2027-01-01" }
+      },
+      "expect": { "passed": true, "failing": ["assets-known"], "outputs": { "prorationDays": 0, "totalUsd": 2500 } }
+    }
+  ]
+}

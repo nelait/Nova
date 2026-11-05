@@ -91,12 +91,30 @@ async function api(path, opts = {}) {
 function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; t.style.background = bad ? 'var(--bad)' : ''; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), bad ? 7000 : 3000); }
 async function guarded(fn) { try { await fn(); } catch (e) { toast(e.message, true); } }
 
-const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
+const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', rules: 'Rules', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
 function renderTabs() { $('#tabs').innerHTML = Object.entries(TABS).map(([k, v]) => `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${v}</button>`).join(''); }
 $('#tabs').onclick = (e) => { const k = e.target.dataset.tab; if (k) { state.tab = k; renderTabs(); render(); } };
 $('#userSel').onchange = (e) => { state.user = e.target.value; state.selTask = null; try { localStorage.setItem('planops.user', state.user); } catch {} render(); };
 
 const money = (n) => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmtValue(v, format) {
+  if (v === null || v === undefined) return '—';
+  if (format === 'usd') return money(v);
+  if (format === 'number') return Number(v).toLocaleString('en-US');
+  if (format === 'percent') return (Number(v) * 100).toFixed(1) + '%';
+  return esc(typeof v === 'object' ? JSON.stringify(v) : String(v));
+}
+const SEV = { error: 'bad', warning: '', info: 'low' };
+function renderRuleResult(r) {
+  const decisions = Object.entries(r.decisions);
+  const outputs = r.outputMeta || [];
+  return `${r.passed ? '<div class="small" style="color:var(--ok);font-weight:600">All blocking rules pass</div>' : '<div class="small" style="color:var(--bad);font-weight:600">Blocking rules failed</div>'}
+    ${r.issues.map((i) => `<div class="alert ${SEV[i.severity]}"><span class="chip">${i.severity}</span>${esc(i.message)}${i.reference ? ` <span class="muted small">(${esc(i.reference)})</span>` : ''}</div>`).join('')}
+    ${decisions.length ? `<div class="small" style="margin:8px 0">${decisions.map(([id, d]) => `<span class="chip">${esc(id)}: ${esc(Object.entries(d).filter(([k]) => k !== 'row').map(([k, v]) => `${k}=${v}`).join(', '))}</span>`).join('')}</div>` : ''}
+    ${outputs.length ? `<table>${outputs.map((o) => `<tr><td>${esc(o.label)}</td><td style="text-align:right">${fmtValue(r.outputs[o.name], o.format)}</td></tr>`).join('')}</table>` : ''}
+    <details style="margin-top:8px"><summary class="small muted">Rule trace (${r.trace.length} evaluations)</summary>
+      <table class="small">${r.trace.map((t) => `<tr><td>${t.kind}</td><td>${esc(t.id)}</td><td><span class="chip ${t.outcome === 'pass' ? 'DONE' : t.outcome === 'fail' || t.outcome === 'error' ? 'exception' : ''}">${t.outcome}</span></td><td class="muted">${t.detail === undefined ? '' : esc(JSON.stringify(t.detail))}</td></tr>`).join('')}</table></details>`;
+}
 const fmtDate = (s) => (s ? s.slice(0, 16).replace('T', ' ') : '');
 const statusChip = (t) => t.exception ? '<span class="chip exception">exception</span>' : `<span class="chip ${t.status}">${t.status}</span>`;
 
@@ -124,12 +142,8 @@ async function renderTaskDetail(el, taskId) {
       <label>Body</label><textarea id="body" rows="14">${esc(p.body)}</textarea>`;
   } else if (p?.kind === 'system-update') {
     work = `<h3>Will ${esc(p.operation)} on ${esc(p.target)}</h3><pre>${esc(JSON.stringify(p.payload, null, 2))}</pre>`;
-  } else if (p?.kind === 'calculation') {
-    const r = p.result;
-    work = `<h3>Calculation</h3><table><tr><td>Deconversion fee</td><td>${money(r.baseFeeUsd)}</td></tr><tr><td>Participant fee (${r.participants.toLocaleString()} participants)</td><td>${money(r.participantFeeUsd)}</td></tr>
-      <tr><td>Prorated asset fee (on ${money(r.planAssetsUsd)} in assets)</td><td>${money(r.assetFeeUsd)}</td></tr><tr><th>Total</th><th>${money(r.totalUsd)}</th></tr></table><p class="small muted">${esc(r.basis)}</p>`;
-  } else if (p?.kind === 'check') {
-    work = `<h3>Validation</h3>${p.issues.length ? p.issues.map((i) => `<div class="alert bad">${esc(i)}</div>`).join('') : '<p>All checks pass.</p>'}`;
+  } else if (p?.kind === 'rules') {
+    work = `<h3>Rules: ${esc(p.result.name)} <span class="muted">(${esc(p.result.ruleSet)} v${p.result.version})</span></h3>${renderRuleResult(p.result)}`;
   }
   el.innerHTML = `<h2>${esc(g.headline)}</h2>
     <div><span class="chip ${g.mode}">${g.mode}</span><span class="small muted">${esc(g.modeExplanation)}</span></div>
@@ -249,7 +263,8 @@ async function renderCases(v) {
   $('#detail').innerHTML = `<h2>${esc(d.plan.details.sponsorName)} — ${d.case.type}</h2>
     <div class="small muted">Case ${d.case.id} · playbook ${d.case.playbookId} v${d.case.playbookVersion} · plan <span class="chip ${d.plan.status}">${d.plan.status}</span>${d.plan.tracPlanId ? ' · ' + d.plan.tracPlanId : ''}</div>
     <h3>Steps</h3><div class="steps">${d.tasks.map((t) => `<div class="step"><div><b>${esc(t.name)}</b><div class="small muted">${t.skill}${t.minSkillLevel > 1 ? ' L' + t.minSkillLevel + '+' : ''} · ${t.assigneeId ?? (t.status === 'READY' && t.mode !== 'AUTO' ? 'unassigned queue' : '—')}</div>
-      ${t.exception ? `<div class="small" style="color:var(--bad)">${esc(t.exception)}</div>` : ''}</div><div><span class="chip ${t.mode}">${t.mode}</span>${statusChip(t)}</div></div>`).join('')}</div>
+      ${t.exception ? `<div class="small" style="color:var(--bad)">${esc(t.exception)}</div>` : ''}
+      ${t.status === 'SKIPPED' ? (() => { const h = t.history.find((x) => x.event === 'skipped' && x.detail?.condition); return h ? `<div class="small muted">Skipped: condition not met (<code>${esc(h.detail.condition)}</code>)</div>` : '<div class="small muted">Skipped: case cancelled</div>'; })() : ''}</div><div><span class="chip ${t.mode}">${t.mode}</span>${statusChip(t)}</div></div>`).join('')}</div>
     ${d.case.status === 'OPEN' ? '<div class="actions"><button class="btn secondary" id="cancel">Cancel case</button></div>' : ''}
     <h3>Audit trail</h3><div class="scroll"><table><tr><th>When</th><th>Who</th><th>Event</th><th>Detail</th></tr>${d.audit.map((a) => `<tr><td class="small">${fmtDate(a.at)}</td><td class="small">${esc(a.actor)}</td><td class="small">${esc(a.event)}</td><td class="small muted">${esc(a.detail ? JSON.stringify(a.detail).slice(0, 140) : '')}</td></tr>`).join('')}</table></div>`;
   $('#cancel')?.addEventListener('click', () => guarded(async () => { const reason = prompt('Reason for cancelling?'); if (!reason) return; await api(`/cases/${state.selCase}/cancel`, { method: 'POST', body: { reason } }); render(); }));
@@ -296,7 +311,43 @@ async function renderInsights(v) {
       <td>${s.draftEditRate === null ? '—' : Math.round(s.draftEditRate * 100) + '%'}</td><td>${s.aiDraftsUsed}</td><td>${s.aiDraftEditRate === null ? '—' : Math.round(s.aiDraftEditRate * 100) + '%'}</td><td>${s.overdueOpen}</td></tr>`).join('')}</table></div></div>`;
 }
 
-const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
+// ---------------------------------------------------------------- rules
+async function renderRules(v) {
+  const sets = await api('/rules');
+  state.selRule = state.selRule && sets.some((s) => s.id === state.selRule) ? state.selRule : sets[0]?.id;
+  v.innerHTML = `<div class="grid2"><div class="panel"><h2>Rule sets (${sets.length})</h2><div id="list"></div>
+      <p class="small muted">Rules live in <code>config/rules/*.json</code>, are versioned, and are checked when the system starts. A playbook step runs one with <code>"type": "rules.evaluate"</code>.</p></div>
+    <div class="panel" id="detail"></div></div>`;
+  $('#list').innerHTML = sets.map((s) => `<div class="item ${s.id === state.selRule ? 'sel' : ''}" data-id="${s.id}"><b>${esc(s.name)}</b>
+    <div class="small muted">${esc(s.id)} v${s.version}</div>
+    <div class="small">${s.counts.decisions ? `<span class="chip">${s.counts.decisions} decision</span>` : ''}${s.counts.outputs ? `<span class="chip">${s.counts.outputs} outputs</span>` : ''}<span class="chip">${s.counts.rules} rules</span><span class="chip">${s.counts.tests} tests</span></div></div>`).join('');
+  $('#list').onclick = (e) => { const it = e.target.closest('.item'); if (it) { state.selRule = it.dataset.id; renderRules(v); } };
+  if (!state.selRule) return;
+  const [def, cases] = await Promise.all([api('/rules/' + state.selRule), api('/cases')]);
+  const meta = sets.find((s) => s.id === def.id);
+  const code = (s) => `<code style="font-size:12px">${esc(s)}</code>`;
+  $('#detail').innerHTML = `<h2>${esc(def.name)} <span class="muted small">${esc(def.id)} v${def.version}</span></h2>
+    ${def.description ? `<p>${esc(def.description)}</p>` : ''}
+    <p class="small"><b>Used by:</b> ${meta.usedBy.map(esc).join(', ') || (meta.overriddenBy.length ? 'client override' : '—')}${meta.overriddenBy.length ? ` · <b>replaces the standard set for:</b> ${meta.overriddenBy.map(esc).join(', ')}` : ''}</p>
+    ${(def.decisions || []).map((d) => `<h3>Decision: ${esc(d.id)}</h3><div class="scroll"><table><tr><th>#</th><th>When</th><th>Then</th></tr>${d.rows.map((r, i) => `<tr><td>${i + 1}</td><td>${r.when ? code(r.when) : '<i>otherwise</i>'}</td><td class="small">${esc(JSON.stringify(r.then))}</td></tr>`).join('')}</table></div>`).join('')}
+    ${def.outputs?.length ? `<h3>Calculated outputs</h3><div class="scroll"><table><tr><th>Output</th><th>Expression</th></tr>${def.outputs.map((o) => `<tr><td>${esc(o.label || o.name)}<div class="small muted">${esc(o.name)}</div></td><td>${code(o.expr)}</td></tr>`).join('')}</table></div>` : ''}
+    <h3>Rules</h3><div class="scroll"><table><tr><th>Rule</th><th>Severity</th><th>Checks</th></tr>${(def.rules || []).map((r) => `<tr><td><b>${esc(r.id)}</b><div class="small muted">${esc(r.message)}</div></td><td><span class="chip">${r.severity || 'error'}</span></td><td>${r.when ? `<div class="small muted">when ${code(r.when)}</div>` : ''}${code(r.assert)}</td></tr>`).join('')}</table></div>
+    <h3>Test cases</h3><div id="ruleTests" class="small">${(def.tests || []).map((t) => `<div>${esc(t.name)}</div>`).join('')}</div>
+    <div class="actions"><button class="btn secondary" id="runTests">Run tests</button></div>
+    <h3>Try it on a case</h3><div class="row"><select id="tryCase">${cases.map((c) => `<option value="${c.id}">${esc(c.sponsorName)} — ${c.type} (${c.status})</option>`).join('')}</select><button class="btn" id="tryBtn" style="flex:0 0 auto">Evaluate</button></div>
+    <p class="small muted">Read-only: evaluates the rule set against the case's current data without changing anything.</p>
+    <div id="tryOut"></div>`;
+  $('#runTests').onclick = () => guarded(async () => {
+    const out = await api(`/rules/${def.id}/test`, { method: 'POST', body: {} });
+    $('#ruleTests').innerHTML = out.map((t) => `<div class="alert ${t.passed ? 'low' : 'bad'}"><span class="chip ${t.passed ? 'DONE' : 'exception'}">${t.passed ? 'pass' : 'fail'}</span>${esc(t.name)}${t.failures.length ? `<div class="small">${t.failures.map(esc).join('<br>')}</div>` : ''}</div>`).join('');
+  });
+  $('#tryBtn').onclick = () => guarded(async () => {
+    const { result } = await api(`/rules/${def.id}/evaluate`, { method: 'POST', body: { caseId: $('#tryCase').value } });
+    $('#tryOut').innerHTML = renderRuleResult(result);
+  });
+}
+
+const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, rules: renderRules, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
 async function render() { const v = $('#view'); await guarded(() => VIEWS[state.tab](v)); loadUsers().catch(() => {}); }
 
 async function loadUsers() {
