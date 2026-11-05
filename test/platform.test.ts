@@ -28,7 +28,7 @@ test('router: queues when nobody has the skill, then routes after users are impo
   assert.equal(app.insights().backlogBySkill.INVESTMENTS, 1);
 
   app.users.importScim(
-    [{ id: '900', userName: 'kai@planops.example', displayName: 'Kai Brown', groups: [{ display: 'skill:INVESTMENTS:2' }] }],
+    [{ id: '900', userName: 'kai@planops.example', displayName: 'Kai Brown', groups: [{ display: 'skill:INVESTMENTS:2' }, { display: 'client:default' }] }],
     'okta',
   );
   assert.equal(app.cases.routeUnassigned(), 1);

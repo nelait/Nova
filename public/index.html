@@ -441,7 +441,7 @@ async function renderCases(v) {
 }
 
 // ---------------------------------------------------------------- team
-const SCIM_SAMPLE = { source: 'okta', Resources: [{ id: '901', userName: 'kai@planops.example', displayName: 'Kai Brown', emails: [{ value: 'kai@planops.example', primary: true }], groups: [{ display: 'skill:INVESTMENTS:2' }, { display: 'skill:TERMINATIONS:2' }] }] };
+const SCIM_SAMPLE = { source: 'okta', Resources: [{ id: '901', userName: 'kai@planops.example', displayName: 'Kai Brown', emails: [{ value: 'kai@planops.example', primary: true }], groups: [{ display: 'skill:INVESTMENTS:2' }, { display: 'skill:TERMINATIONS:2' }, { display: 'client:default' }] }] };
 async function renderTeam(v) {
   const [users, queue, roles] = await Promise.all([api('/users'), api('/queue/unassigned'), api('/roles')]);
   const roleChips = (u) => [...new Set([...roles.defaultRoles, ...(u.roles || [])])].filter((r) => roles.roles[r]).map((r) => `<span class="chip${roles.roles[r].readOnly ? ' exception' : ''}" title="${esc(roles.roles[r].description)}">${esc(r)}</span>`).join('');
@@ -453,11 +453,11 @@ async function renderTeam(v) {
       const has = d.permissions.includes('*') || d.permissions.includes(p);
       return `<td style="text-align:center">${has ? '<span aria-label="yes">●</span>' : '<span class="muted" aria-label="no">·</span>'}</td>`;
     }).join('')}</tr>`).join('')}</table></div>`;
-  v.innerHTML = `<div class="panel"><h2>Users, roles and skills</h2><div class="scroll"><table><tr><th>User</th><th>Roles</th><th>Skills</th><th>Load</th><th>Source</th><th>Active</th></tr>
-    ${users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="small muted">${u.id}</div></td><td>${roleChips(u)}</td><td>${u.skills.map((s) => `<span class="chip">${s.skill} L${s.level}</span>`).join('')}</td><td>${u.openTasks}/${u.capacity}</td><td class="small">${esc(u.source)}</td>
+  v.innerHTML = `<div class="panel"><h2>Users, roles and skills</h2><div class="scroll"><table><tr><th>User</th><th>Roles</th><th>Clients</th><th>Skills</th><th>Load</th><th>Source</th><th>Active</th></tr>
+    ${users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="small muted">${u.id}</div></td><td>${roleChips(u)}</td><td>${u.allClients ? '<span class="chip" title="clients.all permission">All clients</span>' : (u.clients || []).map((c) => `<span class="chip">${esc(c)}</span>`).join('') || '<span class="small muted" title="No client:&lt;id&gt; groups: sees no client\'s work">None</span>'}</td><td>${u.skills.map((s) => `<span class="chip">${s.skill} L${s.level}</span>`).join('')}</td><td>${u.openTasks}/${u.capacity}</td><td class="small">${esc(u.source)}</td>
       <td><input type="checkbox" style="width:auto" data-u="${u.id}" ${u.active ? 'checked' : ''} ${can('users.manage') ? '' : 'disabled title="Needs the users.manage permission"'}></td></tr>`).join('')}</table></div>
     <h3>Unassigned queue (${queue.length})</h3>${queue.map((t) => `<div class="small">${esc(t.name)} — needs ${t.skill} L${t.minSkillLevel}+ ${t.exception ? '<span class="chip exception">exception</span>' : ''}</div>`).join('') || '<p class="small muted">Empty.</p>'}
-    <div class="needs-users-manage"><h3>Import users from identity provider (SCIM)</h3><p class="small muted">Skills are IdP groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>. Importing re-runs routing for the unassigned queue.</p>
+    <div class="needs-users-manage"><h3>Import users from identity provider (SCIM)</h3><p class="small muted">Skills are IdP groups named <code>skill:&lt;SKILL&gt;:&lt;level&gt;</code>, clients <code>client:&lt;id&gt;</code>, roles <code>role:&lt;name&gt;</code>. Importing re-runs routing for the unassigned queue.</p>
     <textarea id="scim" rows="10">${esc(JSON.stringify(SCIM_SAMPLE, null, 2))}</textarea><div class="actions"><button class="btn" id="imp">Import</button></div></div>${roleTable}</div>`;
   v.querySelector('table').onchange = (e) => guarded(async () => { const id = e.target.dataset.u; if (id) { await api(`/users/${id}/active`, { method: 'POST', body: { active: e.target.checked } }); render(); } });
   $('#imp').onclick = () => guarded(async () => { await api('/users/import/scim', { method: 'POST', body: JSON.parse($('#scim').value) }); toast('Imported'); await loadUsers(); render(); });

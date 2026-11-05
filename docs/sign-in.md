@@ -150,21 +150,22 @@ levels.
 | `users.manage` | Import users from the identity provider; activate and deactivate users |
 | `integrations.test` | Test an integration's connection, which calls the external system |
 | `audit.read` | See and download the full **Audit log** |
+| `clients.all` | See and work every client's plans and cases; without it, only the clients in your `client:<id>` groups (see [Client access](#client-access)) |
 
-Everyone signed in can see cases and their own audit trails, plans, rules,
-integrations and their call log, agents, emails and insights, and run a rule
-set's tests.
+Everyone signed in can see, for the clients they have access to, cases and
+their audit trails, plans, emails, integration calls and insights; and rules,
+integrations and agents, and run a rule set's tests.
 
 ### Roles shipped
 
 | Role | Group | Adds |
 |---|---|---|
 | **specialist** | *(everyone)* | `cases.start`, `tasks.work`, `tasks.override` |
-| **supervisor** | `role:supervisor` | `tasks.reassign`, `cases.cancel`, `plans.edit`, `audit.read` |
+| **supervisor** | `role:supervisor` | `tasks.reassign`, `cases.cancel`, `plans.edit`, `audit.read`, `clients.all` |
 | **user-admin** | `role:user-admin` | `users.manage`, `audit.read` |
 | **integration-admin** | `role:integration-admin` | `integrations.test` |
 | **admin** | `role:admin` | Everything |
-| **auditor** | `role:auditor` | `audit.read`, and **read-only**: every permission that changes something is removed, whatever other roles the person has, and they are never routed work |
+| **auditor** | `role:auditor` | `audit.read`, `clients.all`, and **read-only**: every permission that changes something is removed, whatever other roles the person has, and they are never routed work |
 
 **Read-only wins.** Someone with both `role:auditor` and `role:admin` is
 read-only, so adding a group can't quietly give an audit account write access.
@@ -172,6 +173,29 @@ read-only, so adding a group can't quietly give an audit account write access.
 The **Team & skills** screen shows each person's roles and a table of what each
 role allows. In the demo, try **Elena Garcia** (supervisor), **Dana Kim**
 (integration admin), **Olivia Grant** (auditor) and **Priya Shah** (admin).
+
+### Client access
+
+Each plan and case belongs to a client (`config/clients/<clientId>.json`, chosen
+at **New request**). People see and work only their clients' plans and cases,
+given by identity-provider groups named `client:<clientId>`, for example
+`client:acme-premium`, imported through SCIM like skill and role groups (or
+`"clients": [...]` in a direct import). The `clients.all` permission (supervisor,
+admin, auditor) covers every client.
+
+- **Lists** (cases, plans, the work queue, emails, integration calls, the recordkeeper view, insights and the audit log) show only your clients' items. Integration calls not made for a case, such as connection tests, are shown only with `clients.all`.
+- **Another client's case, plan or task is "not found"**, not "forbidden", so its existence isn't revealed.
+- **New requests** can only be for your clients, and changes only to your clients' plans.
+- **Routing** gives a client's tasks only to people with access to that client. If nobody with the skill has access, the task waits in the unassigned queue (the reason says which client), and a supervisor can't reassign it to someone without access either.
+- **Fails closed:** someone with no `client:` groups and no `clients.all` sees no client's work. Give new people their client groups when you give them skills.
+- The **Team & skills** screen shows each person's clients.
+
+In the demo, **Marcus** and **Rafael** work only the `default` client and don't
+see the premium client's Quill & Ink Publishing plan; **Sam** and **Dana** work
+both; **Elena** (supervisor) and **Priya** (admin) see everything.
+
+To keep everyone seeing every client, as before, add `clients.all` to
+`specialist` in `config/roles.json`.
 
 ### Changing roles
 

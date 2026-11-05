@@ -173,6 +173,11 @@ export interface User {
   skills: SkillGrant[];
   /** Permissions beyond working tasks, e.g. 'admin'. From identity-provider groups named role:<name>. */
   roles?: string[];
+  /**
+   * Clients whose plans and cases this person may see and work, from groups named
+   * client:<clientId>. The clients.all permission covers every client instead.
+   */
+  clients?: string[];
   source: string; // e.g. 'okta', 'azure-ad', 'seed'
 }
 

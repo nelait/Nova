@@ -25,6 +25,11 @@ Each client can have a variant of any process (extra steps, different automation
 its own templates or rule sets) without forking the standard process. See
 [Process definitions](playbooks.md#per-client-variations).
 
+**Can we keep one client's plans away from staff who don't serve that client?**
+Yes. Give people `client:<clientId>` groups for the clients they serve; they
+then see and are routed only those clients' work. Supervisors and admins see all
+clients. See [Client access](sign-in.md#client-access).
+
 **How do people sign in?**
 Through your identity provider, with OpenID Connect (Okta, Entra ID, Google
 Workspace, Ping, Auth0) or SAML 2.0 (ADFS, Shibboleth, or SAML apps in those

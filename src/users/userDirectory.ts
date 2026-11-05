@@ -21,7 +21,10 @@ export interface ScimUser {
 export function scimToUser(s: ScimUser, source: string, capacity = 8): User {
   const skills: SkillGrant[] = [];
   const roles: string[] = [];
+  const clients: string[] = [];
   for (const g of s.groups ?? []) {
+    const c = g.display.match(/^client:([a-z0-9][a-z0-9-]*)$/);
+    if (c) clients.push(c[1]);
     const m = g.display.match(/^skill:([A-Z_]+):([1-3])$/);
     if (m) skills.push({ skill: m[1], level: Number(m[2]) });
     const r = g.display.match(/^role:([a-z][a-z0-9-]*)$/);
@@ -36,6 +39,7 @@ export function scimToUser(s: ScimUser, source: string, capacity = 8): User {
     capacity,
     skills,
     roles,
+    clients,
     source,
   };
 }
@@ -59,6 +63,21 @@ export class UserDirectory {
   }
 
   /**
+   * May this person see and work this client's plans and cases? Yes with the
+   * clients.all permission, or when the client is one of theirs (client:<id> groups).
+   * Fails closed: someone with neither sees no client's work.
+   */
+  canAccessClient(u: User | undefined, clientId: string): boolean {
+    if (!u?.active) return false;
+    return this.roles.can(u, 'clients.all') || (u.clients ?? []).includes(clientId);
+  }
+
+  /** People who may be given this client's tasks. */
+  workersFor(clientId: string): User[] {
+    return this.workers().filter((u) => this.canAccessClient(u, clientId));
+  }
+
+  /**
    * Upserts the given users. With fullSync, users from the same source that are
    * not in the batch are deactivated (they left the IdP).
    */
@@ -76,6 +95,7 @@ export class UserDirectory {
         capacity: u.capacity ?? existing?.capacity ?? 8,
         skills: u.skills ?? existing?.skills ?? [],
         roles: u.roles ?? existing?.roles ?? [],
+        clients: u.clients ?? existing?.clients ?? [],
         source,
       };
       this.users.upsert(user);

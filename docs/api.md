@@ -13,6 +13,10 @@ shown in **bold**; without it they return 403 naming it. Read-only routes need
 none, except the audit log. Auditors can use every `GET` route they have
 permission for and the rule `test` and `evaluate` routes.
 
+**Client access.** Everything about plans and cases is limited to the caller's
+[clients](sign-in.md#client-access): lists are filtered, and another client's
+case, plan or task returns 404.
+
 Errors return `{ "error": "...", "issues": [...] }` with status 401 (not signed
 in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
 503 (AI unavailable) or 500.

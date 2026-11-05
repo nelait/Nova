@@ -42,6 +42,9 @@ sign-in identifies the user; without one the API returns 401
 shown in <strong>bold</strong>; without it they return 403 naming it. Read-only routes need
 none, except the audit log. Auditors can use every <code>GET</code> route they have
 permission for and the rule <code>test</code> and <code>evaluate</code> routes.</p>
+<p><strong>Client access.</strong> Everything about plans and cases is limited to the caller&#39;s
+<a href="sign-in.html#client-access">clients</a>: lists are filtered, and another client&#39;s
+case, plan or task returns 404.</p>
 <p>Errors return <code>{ &quot;error&quot;: &quot;...&quot;, &quot;issues&quot;: [...] }</code> with status 401 (not signed
 in), 403 (not allowed), 404 (not found), 422 (validation), 502 (external system),
 503 (AI unavailable) or 500.</p>

@@ -304,10 +304,14 @@ levels.</p>
 <td><code>audit.read</code></td>
 <td>See and download the full <strong>Audit log</strong></td>
 </tr>
+<tr>
+<td><code>clients.all</code></td>
+<td>See and work every client&#39;s plans and cases; without it, only the clients in your <code>client:&lt;id&gt;</code> groups (see <a href="#client-access">Client access</a>)</td>
+</tr>
 </tbody></table></div>
-<p>Everyone signed in can see cases and their own audit trails, plans, rules,
-integrations and their call log, agents, emails and insights, and run a rule
-set&#39;s tests.</p>
+<p>Everyone signed in can see, for the clients they have access to, cases and
+their audit trails, plans, emails, integration calls and insights; and rules,
+integrations and agents, and run a rule set&#39;s tests.</p>
 <h3 id="roles-shipped">Roles shipped</h3>
 <div class="table-wrap"><table>
 <thead>
@@ -325,7 +329,7 @@ set&#39;s tests.</p>
 <tr>
 <td><strong>supervisor</strong></td>
 <td><code>role:supervisor</code></td>
-<td><code>tasks.reassign</code>, <code>cases.cancel</code>, <code>plans.edit</code>, <code>audit.read</code></td>
+<td><code>tasks.reassign</code>, <code>cases.cancel</code>, <code>plans.edit</code>, <code>audit.read</code>, <code>clients.all</code></td>
 </tr>
 <tr>
 <td><strong>user-admin</strong></td>
@@ -345,7 +349,7 @@ set&#39;s tests.</p>
 <tr>
 <td><strong>auditor</strong></td>
 <td><code>role:auditor</code></td>
-<td><code>audit.read</code>, and <strong>read-only</strong>: every permission that changes something is removed, whatever other roles the person has, and they are never routed work</td>
+<td><code>audit.read</code>, <code>clients.all</code>, and <strong>read-only</strong>: every permission that changes something is removed, whatever other roles the person has, and they are never routed work</td>
 </tr>
 </tbody></table></div>
 <p><strong>Read-only wins.</strong> Someone with both <code>role:auditor</code> and <code>role:admin</code> is
@@ -353,6 +357,26 @@ read-only, so adding a group can&#39;t quietly give an audit account write acces
 <p>The <strong>Team &amp; skills</strong> screen shows each person&#39;s roles and a table of what each
 role allows. In the demo, try <strong>Elena Garcia</strong> (supervisor), <strong>Dana Kim</strong>
 (integration admin), <strong>Olivia Grant</strong> (auditor) and <strong>Priya Shah</strong> (admin).</p>
+<h3 id="client-access">Client access</h3>
+<p>Each plan and case belongs to a client (<code>config/clients/&lt;clientId&gt;.json</code>, chosen
+at <strong>New request</strong>). People see and work only their clients&#39; plans and cases,
+given by identity-provider groups named <code>client:&lt;clientId&gt;</code>, for example
+<code>client:acme-premium</code>, imported through SCIM like skill and role groups (or
+<code>&quot;clients&quot;: [...]</code> in a direct import). The <code>clients.all</code> permission (supervisor,
+admin, auditor) covers every client.</p>
+<ul>
+<li><strong>Lists</strong> (cases, plans, the work queue, emails, integration calls, the recordkeeper view, insights and the audit log) show only your clients&#39; items. Integration calls not made for a case, such as connection tests, are shown only with <code>clients.all</code>.</li>
+<li><strong>Another client&#39;s case, plan or task is &quot;not found&quot;</strong>, not &quot;forbidden&quot;, so its existence isn&#39;t revealed.</li>
+<li><strong>New requests</strong> can only be for your clients, and changes only to your clients&#39; plans.</li>
+<li><strong>Routing</strong> gives a client&#39;s tasks only to people with access to that client. If nobody with the skill has access, the task waits in the unassigned queue (the reason says which client), and a supervisor can&#39;t reassign it to someone without access either.</li>
+<li><strong>Fails closed:</strong> someone with no <code>client:</code> groups and no <code>clients.all</code> sees no client&#39;s work. Give new people their client groups when you give them skills.</li>
+<li>The <strong>Team &amp; skills</strong> screen shows each person&#39;s clients.</li>
+</ul>
+<p>In the demo, <strong>Marcus</strong> and <strong>Rafael</strong> work only the <code>default</code> client and don&#39;t
+see the premium client&#39;s Quill &amp; Ink Publishing plan; <strong>Sam</strong> and <strong>Dana</strong> work
+both; <strong>Elena</strong> (supervisor) and <strong>Priya</strong> (admin) see everything.</p>
+<p>To keep everyone seeing every client, as before, add <code>clients.all</code> to
+<code>specialist</code> in <code>config/roles.json</code>.</p>
 <h3 id="changing-roles">Changing roles</h3>
 <p>Edit <code>config/roles.json</code> and restart. For example, to let only supervisors
 override failed automatic steps, remove <code>tasks.override</code> from <code>specialist</code> and

@@ -28,7 +28,7 @@ POST /api/users/import/scim
   "fullSync": true,
   "Resources": [
     { "id": "901", "userName": "kai@example.com", "displayName": "Kai Brown",
-      "groups": [{ "display": "skill:INVESTMENTS:2" }, { "display": "skill:TERMINATIONS:2" }] }
+      "groups": [{ "display": "skill:INVESTMENTS:2" }, { "display": "skill:TERMINATIONS:2" }, { "display": "client:default" }] }
   ]
 }
 ```
@@ -42,12 +42,13 @@ Groups named `role:<name>` give people roles such as `supervisor`, `user-admin`
 or `auditor`, which decide what they may do; see [Roles and permissions](sign-in.md#roles-and-permissions).
 Importing users needs the `users.manage` permission. Only people with the
 `tasks.work` permission are routed work: auditors (read-only) never are, even if
-they hold skills. People sign in with the same email their user record has; see
+they hold skills. Groups named `client:<clientId>` say which clients' work a
+person may see and be given; see [Client access](sign-in.md#client-access). People sign in with the same email their user record has; see
 [Sign-in](sign-in.md). Deactivated users are signed out at once.
 
 ## How work is routed
 
-1. **Eligible:** active, has the `tasks.work` permission (not an auditor), holds the step's skill at or above its minimum level, and below capacity.
+1. **Eligible:** active, has the `tasks.work` permission (not an auditor), has access to the case's client, holds the step's skill at or above its minimum level, and below capacity.
 2. **Least loaded:** the lowest ratio of open tasks to capacity.
 3. **Ties rotate:** among equally loaded people, whoever was assigned work least recently goes next. Seniority does not win ties, so work is shared evenly.
 4. **Deterministic:** the final tie-break is the user id.

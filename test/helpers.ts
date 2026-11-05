@@ -17,7 +17,7 @@ export function testApp(aiModel: ModelCall | null = null, agentModel: AgentModel
  * level-2 work never reaches a trainee add one explicitly.
  */
 export function addComplianceTrainee(app: App): string {
-  app.users.importScim([{ id: 'trainee', userName: 'tia@planops.example', displayName: 'Tia Trainee', groups: [{ display: 'skill:COMPLIANCE:1' }] }], 'test');
+  app.users.importScim([{ id: 'trainee', userName: 'tia@planops.example', displayName: 'Tia Trainee', groups: [{ display: 'skill:COMPLIANCE:1' }, { display: 'client:default' }, { display: 'client:acme-premium' }] }], 'test');
   return 'u_trainee';
 }
 

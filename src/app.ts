@@ -120,7 +120,12 @@ export function createApp(opts: AppOptions = {}) {
     guidance,
     ai,
     auth,
-    insights: () => computeInsights(repos.cases.all(), repos.tasks.all(), users.workers(), clock.now()),
+    /** Insights, optionally over only some cases (a person restricted to some clients). */
+    insights: (only?: (c: Case) => boolean) => {
+      const cases = only ? repos.cases.all().filter(only) : repos.cases.all();
+      const ids = new Set(cases.map((c) => c.id));
+      return computeInsights(cases, repos.tasks.all().filter((t) => ids.has(t.caseId)), users.workers(), clock.now());
+    },
   };
 }
 

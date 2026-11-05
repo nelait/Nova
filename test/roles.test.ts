@@ -16,10 +16,10 @@ const person = (roles: string[], active = true): User => ({ id: 'u_x', name: 'X'
 test('roles add up, admin has everything, and read-only wins', () => {
   const m = new RoleModel(shipped);
   assert.deepEqual(m.permissions(person([])), ['cases.start', 'tasks.work', 'tasks.override'], 'everyone is a specialist');
-  assert.deepEqual(m.permissions(person(['supervisor'])), ['cases.start', 'tasks.work', 'tasks.override', 'tasks.reassign', 'cases.cancel', 'plans.edit', 'audit.read']);
+  assert.deepEqual(m.permissions(person(['supervisor'])), ['cases.start', 'tasks.work', 'tasks.override', 'tasks.reassign', 'cases.cancel', 'plans.edit', 'audit.read', 'clients.all']);
   assert.ok(m.can(person(['user-admin']), 'users.manage') && !m.can(person(['user-admin']), 'cases.cancel'));
   assert.deepEqual(m.permissions(person(['admin'])), Object.keys(PERMISSIONS));
-  assert.deepEqual(m.permissions(person(['admin', 'auditor'])), ['audit.read'], 'an auditor who is also admin is read-only');
+  assert.deepEqual(m.permissions(person(['admin', 'auditor'])), ['audit.read', 'clients.all'], 'an auditor who is also admin is read-only');
   assert.equal(m.canWork(person(['auditor'])), false);
   assert.deepEqual(m.permissions(person(['admin'], false)), [], 'deactivated people can do nothing');
   assert.deepEqual(m.rolesOf(person(['no-such-role'])), ['specialist'], 'unknown groups are ignored');

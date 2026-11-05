@@ -320,11 +320,12 @@ export class CaseService {
   /** Route every ready human task that has no owner (optionally only for one case). */
   routeUnassigned(caseId?: string): number {
     let routed = 0;
-    // Only people who may be given tasks (roles), then by skill (router).
-    const users = this.users.workers();
+    // Only people who may be given tasks (roles) for this case's client, then by skill (router).
     const pending = this.r.tasks.find((t) => t.status === 'READY' && !t.assigneeId && this.needsHuman(t) && (!caseId || t.caseId === caseId));
     for (const t of pending) {
-      const decision = routeTask(t, users, this.openLoad(), [], this.lastAssigned());
+      const clientId = this.r.cases.require(t.caseId).clientId;
+      const decision = routeTask(t, this.users.workersFor(clientId), this.openLoad(), [], this.lastAssigned());
+      if (!decision.assigneeId) decision.reason = `${decision.reason} with access to client ${clientId}`;
       if (decision.assigneeId) {
         this.save(t, { assigneeId: decision.assigneeId }, 'router', 'assigned', { to: decision.assigneeId, reason: decision.reason });
         routed++;
@@ -427,8 +428,10 @@ export class CaseService {
       if (!u?.active) throw new ValidationError(`User ${target} is not active`);
       if (!this.users.can(u, 'tasks.work')) throw new ValidationError(`${u.name} can't be given tasks (no tasks.work permission; auditors are read-only)`);
       if (!u.skills.some((s) => s.skill === t.skill && s.level >= t.minSkillLevel)) throw new ValidationError(`${u.name} lacks ${t.skill} L${t.minSkillLevel}`);
+      const clientId = this.r.cases.require(t.caseId).clientId;
+      if (!this.users.canAccessClient(u, clientId)) throw new ValidationError(`${u.name} doesn't have access to client ${clientId}`);
     } else {
-      target = routeTask(t, this.users.workers(), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;
+      target = routeTask(t, this.users.workersFor(this.r.cases.require(t.caseId).clientId), this.openLoad(), t.assigneeId ? [t.assigneeId] : [], this.lastAssigned()).assigneeId;
     }
     return this.save(t, { assigneeId: target, status: 'READY', startedAt: undefined }, by, 'reassigned', { from: t.assigneeId, to: target ?? null });
   }

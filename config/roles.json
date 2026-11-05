@@ -2,12 +2,12 @@
   "defaultRoles": ["specialist"],
   "roles": {
     "specialist": {
-      "description": "Everyone: start requests and work the tasks their skills qualify them for.",
+      "description": "Everyone: start requests and work the tasks their skills qualify them for, for their own clients.",
       "permissions": ["cases.start", "tasks.work", "tasks.override"]
     },
     "supervisor": {
-      "description": "Team lead: rebalance work, cancel cases, correct plan records, review the audit log.",
-      "permissions": ["tasks.reassign", "cases.cancel", "plans.edit", "audit.read"]
+      "description": "Team lead, across all clients: rebalance work, cancel cases, correct plan records, review the audit log.",
+      "permissions": ["tasks.reassign", "cases.cancel", "plans.edit", "audit.read", "clients.all"]
     },
     "user-admin": {
       "description": "Manage who can use Plan Ops Hub: import, activate and deactivate users.",
@@ -22,8 +22,8 @@
       "permissions": ["*"]
     },
     "auditor": {
-      "description": "Read-only: see everything, including the full audit log, and change nothing. Never routed work.",
-      "permissions": ["audit.read"],
+      "description": "Read-only: see every client and the full audit log, and change nothing. Never routed work.",
+      "permissions": ["audit.read", "clients.all"],
       "readOnly": true
     }
   }

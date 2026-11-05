@@ -13,7 +13,42 @@ import { AuthError } from '../auth/oidc.ts';
 import type { AuditEvent, User } from '../domain/types.ts';
 import { PERMISSIONS, type Permission } from '../users/roles.ts';
 
-type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string; me?: User; can: (p: Permission) => boolean }) => unknown;
+type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string; me?: User; can: (p: Permission) => boolean; scope: ClientScope }) => unknown;
+
+/**
+ * Which clients' plans and cases the caller may see and act on (clients.all, or
+ * their client:<id> groups). Another client's case, plan or task is reported as
+ * not found rather than forbidden, so its existence isn't revealed.
+ */
+type ClientScope = ReturnType<typeof clientScope>;
+function clientScope(app: App, me: User | undefined) {
+  const all = app.users.can(me, 'clients.all');
+  const ok = (clientId: string | undefined) => all || (!!clientId && app.users.canAccessClient(me, clientId));
+  const caseOk = (caseId: string | undefined) => all || (!!caseId && ok(app.repos.cases.get(caseId)?.clientId));
+  const planOk = (planId: string | undefined) => all || (!!planId && ok(app.repos.plans.get(planId)?.clientId));
+  const hidden = (what: string, id: string) => new NotFoundError(`${what}/${id} not found`);
+  return {
+    all,
+    ok,
+    caseOk,
+    planOk,
+    requireCase(id: string) {
+      const c = app.repos.cases.require(id);
+      if (!ok(c.clientId)) throw hidden('cases', id);
+      return c;
+    },
+    requirePlan(id: string) {
+      const p = app.repos.plans.require(id);
+      if (!ok(p.clientId)) throw hidden('plans', id);
+      return p;
+    },
+    requireTask(id: string) {
+      const t = app.repos.tasks.require(id);
+      if (!caseOk(t.caseId)) throw hidden('tasks', id);
+      return t;
+    },
+  };
+}
 
 /**
  * Every route that changes something names the permission it needs (see
@@ -54,12 +89,12 @@ route('GET', '/api/roles', ({ app }) => ({ permissions: PERMISSIONS, ...app.user
 
 // --- reference data
 route('GET', '/api/playbooks', ({ app }) => app.kb.listPlaybooks());
-route('GET', '/api/clients', ({ app }) => app.kb.listClients());
+route('GET', '/api/clients', ({ app, scope }) => app.kb.listClients().filter((c) => scope.ok(c.clientId)));
 
 // --- users & skills (IdP import)
 route('GET', '/api/users', ({ app }) => {
   const load = app.cases.openLoad();
-  return app.users.list().map((u) => ({ ...u, openTasks: load.get(u.id) ?? 0 }));
+  return app.users.list().map((u) => ({ ...u, allClients: app.users.can(u, 'clients.all'), openTasks: load.get(u.id) ?? 0 }));
 });
 route('POST', '/api/users/import', ({ app, body }) => app.users.import(body.users, body.source ?? 'api', !!body.fullSync), { perm: 'users.manage' });
 route('POST', '/api/users/import/scim', ({ app, body }) => {
@@ -74,38 +109,44 @@ route('POST', '/api/users/:id/active', ({ app, params, body }) => {
 }, { perm: 'users.manage' });
 
 // --- intake (all channels)
-route('POST', '/api/intake', ({ app, body, actor }) => app.cases.submitIntake(body, actor), { perm: 'cases.start' });
+route('POST', '/api/intake', ({ app, body, actor, scope }) => {
+  // A change to an existing plan is for that plan's client; a new plan names its client.
+  if (body.planId) scope.requirePlan(String(body.planId));
+  else if (!scope.ok(body.clientId || 'default')) throw new ForbiddenError(`You don't have access to client ${body.clientId || 'default'}`);
+  return app.cases.submitIntake(body, actor);
+}, { perm: 'cases.start' });
 
 // --- plans
-route('GET', '/api/plans', ({ app }) => app.repos.plans.all().reverse());
-route('GET', '/api/plans/:id', ({ app, params }) => app.repos.plans.require(params.id));
-route('PATCH', '/api/plans/:id', ({ app, params, body, actor }) => app.cases.updatePlanDetails(params.id, body, actor), { perm: 'plans.edit' });
+route('GET', '/api/plans', ({ app, scope }) => app.repos.plans.all().reverse().filter((p) => scope.ok(p.clientId)));
+route('GET', '/api/plans/:id', ({ params, scope }) => scope.requirePlan(params.id));
+route('PATCH', '/api/plans/:id', ({ app, params, body, actor, scope }) => (scope.requirePlan(params.id), app.cases.updatePlanDetails(params.id, body, actor)), { perm: 'plans.edit' });
 
 // --- cases
-route('GET', '/api/cases', ({ app }) =>
-  app.repos.cases.all().reverse().map((c) => {
+route('GET', '/api/cases', ({ app, scope }) =>
+  app.repos.cases.all().reverse().filter((c) => scope.ok(c.clientId)).map((c) => {
     const tasks = app.cases.tasksFor(c.id);
     const plan = app.repos.plans.get(c.planId);
     return { ...c, sponsorName: plan?.details.sponsorName, progress: { done: tasks.filter((t) => t.status === 'DONE' || t.status === 'SKIPPED').length, total: tasks.length } };
   }),
 );
-route('GET', '/api/cases/:id', ({ app, params }) => {
-  const c = app.repos.cases.require(params.id);
+route('GET', '/api/cases/:id', ({ app, params, scope }) => {
+  const c = scope.requireCase(params.id);
   return { case: c, plan: app.repos.plans.require(c.planId), tasks: app.cases.tasksFor(c.id), audit: app.repos.audit.find((e) => e.caseId === c.id) };
 });
-route('POST', '/api/cases/:id/cancel', ({ app, params, body, actor }) => app.cases.cancelCase(params.id, actor, body.reason ?? ''), { perm: 'cases.cancel' });
+route('POST', '/api/cases/:id/cancel', ({ app, params, body, actor, scope }) => (scope.requireCase(params.id), app.cases.cancelCase(params.id, actor, body.reason ?? '')), { perm: 'cases.cancel' });
 
 // --- work items
-route('GET', '/api/inbox/:userId', ({ app, params }) =>
-  app.cases.inbox(params.userId).map((t) => {
+route('GET', '/api/inbox/:userId', ({ app, params, scope }) =>
+  app.cases.inbox(params.userId).filter((t) => scope.caseOk(t.caseId)).map((t) => {
     const c = app.repos.cases.require(t.caseId);
     return { ...t, caseType: c.type, sponsorName: app.repos.plans.require(t.planId).details.sponsorName };
   }),
 );
-route('GET', '/api/queue/unassigned', ({ app }) => app.cases.unassignedQueue());
-route('GET', '/api/tasks/:id/guidance', ({ app, params, actor }) => app.guidance.forTask(app.cases.contextFor(app.repos.tasks.require(params.id), actor)));
-route('POST', '/api/tasks/:id/start', ({ app, params, actor }) => app.cases.startTask(params.id, actor), { perm: 'tasks.work' });
-route('POST', '/api/tasks/:id/complete', ({ app, params, body, actor, can }) => {
+route('GET', '/api/queue/unassigned', ({ app, scope }) => app.cases.unassignedQueue().filter((t) => scope.caseOk(t.caseId)));
+route('GET', '/api/tasks/:id/guidance', ({ app, params, actor, scope }) => app.guidance.forTask(app.cases.contextFor(scope.requireTask(params.id), actor)));
+route('POST', '/api/tasks/:id/start', ({ app, params, actor, scope }) => (scope.requireTask(params.id), app.cases.startTask(params.id, actor)), { perm: 'tasks.work' });
+route('POST', '/api/tasks/:id/complete', ({ app, params, body, actor, can, scope }) => {
+  scope.requireTask(params.id);
   if (body.override && !can('tasks.override')) throw new ForbiddenError('Overriding a failed step needs the tasks.override permission');
   return app.cases.completeTask(params.id, actor, body);
 }, { perm: 'tasks.work' });
@@ -124,16 +165,16 @@ route('GET', '/api/rules', ({ app }) =>
 route('GET', '/api/rules/functions', () => Object.entries(FUNCTIONS).map(([name, f]) => ({ name, doc: f.doc })));
 route('GET', '/api/rules/:id', ({ app, params }) => app.kb.rules.get(params.id));
 route('POST', '/api/rules/:id/test', ({ app, params }) => app.kb.rules.test(params.id), { readOnly: true });
-route('POST', '/api/rules/:id/evaluate', ({ app, params, body }) => {
+route('POST', '/api/rules/:id/evaluate', ({ app, params, body, scope }) => {
   // Evaluate against a live case (read-only) or a context supplied by the caller.
-  const context = body.caseId ? app.cases.ruleContextForCase(String(body.caseId)) : (body.context ?? {});
+  const context = body.caseId ? app.cases.ruleContextForCase(scope.requireCase(String(body.caseId)).id) : (body.context ?? {});
   return { context, result: app.kb.rules.evaluate(params.id, context) };
 }, { readOnly: true });
 
 route('GET', '/api/ai/status', ({ app }) => ({ enabled: app.ai.enabled, model: app.ai.model }));
-route('GET', '/api/tasks/:id/ai-assist', ({ app, params, actor }) => app.ai.cached(params.id, actor));
-route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor }) => app.ai.assist(params.id, actor, !!body.refresh), { perm: 'tasks.work' });
-route('POST', '/api/tasks/:id/agent/run', ({ app, params, actor }) => app.cases.rerunAgent(params.id, actor), { perm: 'tasks.work' });
+route('GET', '/api/tasks/:id/ai-assist', ({ app, params, actor, scope }) => (scope.requireTask(params.id), app.ai.cached(params.id, actor)));
+route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor, scope }) => (scope.requireTask(params.id), app.ai.assist(params.id, actor, !!body.refresh)), { perm: 'tasks.work' });
+route('POST', '/api/tasks/:id/agent/run', ({ app, params, actor, scope }) => (scope.requireTask(params.id), app.cases.rerunAgent(params.id, actor)), { perm: 'tasks.work' });
 route('GET', '/api/agents', ({ app }) =>
   app.kb.agents.list().map((a) => ({
     ...a,
@@ -141,7 +182,8 @@ route('GET', '/api/agents', ({ app }) =>
     usedBy: app.kb.listPlaybooks().flatMap((p) => p.steps.filter((s) => s.action.type === 'ai.agent' && s.action.params?.agent === a.id).map((s) => `${p.caseType} / ${s.id}`)),
   })),
 );
-route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor, can }) => {
+route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor, can, scope }) => {
+  scope.requireTask(params.id);
   // The task's owner can hand it back to routing; moving anyone else's task needs tasks.reassign.
   if (!can('tasks.reassign') && app.repos.tasks.require(params.id).assigneeId !== actor) throw new ForbiddenError("Reassigning someone else's task needs the tasks.reassign permission");
   return app.cases.reassign(params.id, actor, body.toUserId);
@@ -149,7 +191,13 @@ route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor, can }) => 
 
 // --- integrations & learning
 // The Recordkeeper screen reads TRAC through its configured integration, like the engine does.
-route('GET', '/api/trac/plans', async ({ app, actor }) => (await app.integrations.call('trac', 'listPlans', { actor })).data);
+route('GET', '/api/trac/plans', async ({ app, actor, scope }) => {
+  const plans = (await app.integrations.call('trac', 'listPlans', { actor })).data as { id: string }[];
+  if (scope.all) return plans;
+  // Only recordkeeper plans that belong to one of the caller's clients.
+  const mine = new Set(app.repos.plans.find((p) => !!p.tracPlanId && scope.ok(p.clientId)).map((p) => p.tracPlanId));
+  return plans.filter((p) => mine.has(p.id));
+});
 // Demo aid for the built-in mock TRAC only; never available with single sign-on.
 route('POST', '/api/trac/simulate-outage', ({ app, body }) => {
   if (app.auth.mode !== 'dev') throw new NotFoundError('No such route');
@@ -183,17 +231,23 @@ route('GET', '/api/integrations', ({ app }) =>
   })),
 );
 route('POST', '/api/integrations/:id/test', ({ app, params }) => app.integrations.test(params.id), { perm: 'integrations.test' });
-route('GET', '/api/integrations/calls', ({ app, query }) => app.integrations.calls(Number(query.get('limit') ?? 50)));
-route('GET', '/api/outbox', ({ app }) => app.email.list());
-route('GET', '/api/insights', ({ app }) => app.insights());
+// Calls not made for a case (connection tests, recordkeeper listings) are shown only with clients.all.
+route('GET', '/api/integrations/calls', ({ app, query, scope }) => {
+  const limit = Number(query.get('limit') ?? 50);
+  return scope.all ? app.integrations.calls(limit) : app.integrations.calls(10_000).filter((c) => scope.caseOk(c.caseId)).slice(0, limit);
+});
+route('GET', '/api/outbox', ({ app, scope }) => app.email.list().filter((e) => scope.caseOk(e.caseId)));
+route('GET', '/api/insights', ({ app, scope }) => app.insights(scope.all ? undefined : (c) => scope.ok(c.clientId)));
 // Audit log, newest first, with optional filters. format=csv downloads it for review elsewhere.
-route('GET', '/api/audit', ({ app, query }) => {
+route('GET', '/api/audit', ({ app, query, scope }) => {
   const q = (k: string) => query.get(k)?.trim() || undefined;
   const [actor, event, entity, from, to] = [q('actor'), q('event'), q('entityId'), q('from'), q('to')];
   const rows = app.repos.audit
     .all()
     .reverse()
-    .filter((e) => (!actor || e.actor === actor) && (!event || e.event.startsWith(event)) && (!entity || e.entityId === entity) && (!from || e.at >= from) && (!to || e.at < to));
+    .filter((e) => (!actor || e.actor === actor) && (!event || e.event.startsWith(event)) && (!entity || e.entityId === entity) && (!from || e.at >= from) && (!to || e.at < to))
+    // Restricted to some clients: their cases' and plans' events, plus events not about a client (sign-ins, user changes).
+    .filter((e) => scope.all || (e.caseId ? scope.caseOk(e.caseId) : e.entity === 'plan' ? scope.planOk(e.entityId) : true));
   const limit = Math.min(Number(q('limit') ?? 200), 10_000);
   if (q('format') === 'csv') return new CsvBody(auditCsv(rows.slice(0, limit)));
   return rows.slice(0, limit);
@@ -445,7 +499,7 @@ export function startServer(app: App, port: number, publicDir: string, opts: { h
           }
           const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
           const body = req.method === 'GET' ? {} : await readBody(req);
-          const result = await r.handler({ app, params, body, query: url.searchParams, actor, me, can });
+          const result = await r.handler({ app, params, body, query: url.searchParams, actor, me, can, scope: clientScope(app, me) });
           if (result instanceof CsvBody) {
             res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="plan-ops-audit.csv"', 'cache-control': 'no-store' });
             return void res.end(result.text);
