@@ -5,6 +5,8 @@ import { STEP_CONDITION_ROOTS, type RuleResult } from '../rules/ruleEngine.ts';
 import type { EmailGateway } from '../integrations/email.ts';
 import type { IntegrationClient } from '../integrations/client.ts';
 import { compileBody } from '../integrations/registry.ts';
+import type { AgentProposal, AgentRunner } from '../ai/agents.ts';
+import { skeleton, validate, type Schema } from '../ai/jsonSchema.ts';
 
 export interface ActionContext {
   task: Task;
@@ -54,17 +56,33 @@ export type PreparedAction =
       writes: boolean;
       input: unknown;
     }
+  | {
+      kind: 'agent';
+      agent: string;
+      name: string;
+      version: number;
+      description?: string;
+      /** The agent's proposal, or null if it hasn't produced one (failed, or AI not configured). */
+      proposal: AgentProposal | null;
+      /** What a person edits and approves: the proposal, or an empty result to fill in by hand. */
+      editable: unknown;
+      outputSchema: Schema;
+      tools: { name: string; system: string; operation: string }[];
+    }
   | { kind: 'manual' };
 
 export interface Edits {
   subject?: string;
   body?: string;
+  /** For ai.agent steps: the result as approved (possibly edited, or entered by hand). */
+  output?: unknown;
 }
 
 export interface ExecutionOutcome {
   result: unknown;
   plan?: Plan; // updated plan, if the action changed it
   draftEdited?: boolean;
+  draftSource?: 'template' | 'ai';
 }
 
 export class ActionError extends Error {
@@ -85,10 +103,26 @@ export class ActionExecutor {
   private integrations: IntegrationClient;
   private email: EmailGateway;
 
-  constructor(kb: KnowledgeBase, integrations: IntegrationClient, email: EmailGateway) {
+  private agents: AgentRunner;
+
+  constructor(kb: KnowledgeBase, integrations: IntegrationClient, email: EmailGateway, agents: AgentRunner) {
     this.kb = kb;
     this.integrations = integrations;
     this.email = email;
+    this.agents = agents;
+  }
+
+  /** Run an ai.agent step's agent and return its proposal (nothing is applied). */
+  runAgent(ctx: ActionContext): Promise<AgentProposal> {
+    const step = this.kb.playbookFor(ctx.kase.type, ctx.kase.clientId).steps.find((s) => s.id === ctx.task.stepId);
+    return this.agents.run(String(ctx.task.action.params?.agent), {
+      context: ruleContext(ctx),
+      stepName: ctx.task.name,
+      guidance: step?.guidance ?? '',
+      caseId: ctx.kase.id,
+      taskId: ctx.task.id,
+      now: ctx.today.toISOString(),
+    });
   }
 
   private get tracName(): string {
@@ -129,6 +163,21 @@ export class ActionExecutor {
           input = { error: (e as Error).message };
         }
         return { kind: 'integration', system: sys.def.id, systemName: sys.def.name, operation: op.name, description: op.def.description, method: op.def.method, writes: op.def.method !== 'GET', input };
+      }
+      case 'ai.agent': {
+        const def = this.kb.agents.get(String(p.agent));
+        const proposal = task.proposal ?? null;
+        return {
+          kind: 'agent',
+          agent: def.id,
+          name: def.name,
+          version: def.version,
+          description: def.description,
+          proposal,
+          editable: proposal?.output ?? skeleton(def.output),
+          outputSchema: def.output,
+          tools: (def.tools ?? []).map((t) => ({ name: t.name, system: t.system, operation: t.operation })),
+        };
       }
       case 'email.send':
         return this.prepareEmail(ctx);
@@ -173,6 +222,32 @@ export class ActionExecutor {
         const errors = r.issues.filter((i) => i.severity === 'error').map((i) => i.message);
         if (!r.passed) throw new ActionError(`Validation failed: ${errors.length} issue(s)`, errors);
         return { result: r };
+      }
+
+      case 'ai.agent': {
+        const def = this.kb.agents.get(String(p.agent));
+        const proposed = task.proposal?.output;
+        const output = edits?.output !== undefined ? edits.output : proposed;
+        if (output === undefined) throw new ActionError('There is no result to approve. Run the agent again, or enter the result by hand.');
+        const problems = validate(output, def.output);
+        if (problems.length) throw new ActionError('The result does not match the expected format', problems);
+        const edited = proposed === undefined || JSON.stringify(output) !== JSON.stringify(proposed);
+        return {
+          result: {
+            agent: def.id,
+            version: def.version,
+            output,
+            proposedOutput: proposed ?? null,
+            edited,
+            source: proposed === undefined ? 'manual' : 'agent',
+            model: task.proposal?.model ?? null,
+            servedBy: task.proposal?.servedBy ?? null,
+            toolCalls: task.proposal?.toolCalls ?? [],
+            usage: task.proposal?.usage ?? null,
+          },
+          draftEdited: edited,
+          draftSource: proposed === undefined ? 'template' : 'ai',
+        };
       }
 
       case 'integration.call': {

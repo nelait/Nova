@@ -57,6 +57,7 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
 | 10 | Claude assistance (optional) | `src/ai/claudeAssist.ts` |
 | 11 | Rules engine: decision tables, calculations, validations | `src/rules/`, `config/rules/` ([RULES.md](RULES.md)) |
 | 12 | Integration module: configured external systems | `src/integrations/`, `config/integrations/` ([INTEGRATIONS.md](INTEGRATIONS.md)) |
+| 13 | AI agent steps | `src/ai/agents.ts`, `config/agents/` ([AGENTS.md](AGENTS.md)) |
 
 ## Key design decisions
 
@@ -133,6 +134,19 @@ New request types are added with a new playbook JSON file plus a `CaseType` valu
    the demo and tests self-contained while exercising the same HTTP contract. The
    engine is async, with work on each case serialized. See
    [INTEGRATIONS.md](INTEGRATIONS.md).
+
+10. **AI agents are steps, and their output is a proposal.** An `ai.agent` step
+    must be `REVIEW` mode. The agent runs when the step becomes ready. It sees only
+    its configured input, can call only read-only integration operations, and must
+    return its output schema. A person approves or edits the proposal, which is
+    validated again, and only the approved result feeds later steps. A rule set
+    after the agent checks the approved output. If AI is unavailable, the person
+    enters the result by hand. See [AGENTS.md](AGENTS.md).
+
+So a process mixes four kinds of step: **integration** (fetch or update an
+external system), **rules** (logic and decisions), **AI agent** (proposal) and
+**person** (review, approval, manual work), connected by dependencies and `when`
+conditions and passing data through `steps['<id>']`.
 
 ## Task state machine
 

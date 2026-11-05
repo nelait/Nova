@@ -3,6 +3,8 @@
 // insights) has realistic content. All companies and people are fictional.
 import type { App } from '../src/app.ts';
 import type { AssistOutput, ModelCall } from '../src/ai/claudeAssist.ts';
+import type { AgentModel } from '../src/ai/agents.ts';
+import { skeleton } from '../src/ai/jsonSchema.ts';
 import type { Fund, PlanDetails, Task } from '../src/domain/types.ts';
 
 /** Clock that replays history in simulated time, then switches to real time. */
@@ -98,6 +100,34 @@ export const sampleModel: ModelCall = async ({ user }) => {
     model: SAMPLE_LABEL,
     servedBy: SAMPLE_LABEL,
     usage: { inputTokens: 0, outputTokens: 0 },
+  };
+};
+
+/**
+ * Canned stand-in for an AI agent when no API key is set. For the fund-mapping
+ * agent it uses its lookup tool (a real call through the integration layer to
+ * the mock fund catalog) and maps by asset class. Labeled as sample data.
+ */
+export const sampleAgentModel: AgentModel = async ({ user, tools, outputSchema }) => {
+  const data = JSON.parse(user.split('<case_data>\n')[1].split('\n</case_data>')[0]) as { removedFunds?: Fund[]; newLineup?: Fund[] };
+  const label = { model: SAMPLE_LABEL, servedBy: SAMPLE_LABEL, usage: { inputTokens: 0, outputTokens: 0 } };
+  if (!data.removedFunds || !data.newLineup || !tools[0]) return { ...label, output: skeleton(outputSchema), toolCalls: [] };
+  const tickers = [...data.removedFunds, ...data.newLineup].map((f) => f.ticker);
+  const looked = (await tools[0].run({ tickers })) as { funds: { ticker: string; name?: string }[] };
+  const name = (t: string) => looked.funds.find((f) => f.ticker === t)?.name ?? t;
+  const kind = (n: string) => (/international/i.test(n) ? 'international stocks' : /bond|income/i.test(n) ? 'bonds' : /500|stock|growth/i.test(n) ? 'U.S. stocks' : /target|freedom/i.test(n) ? 'target-date' : 'other');
+  const mappings: { fromTicker: string; toTicker: string; rationale: string }[] = [];
+  const unmatchedFunds: { ticker: string; reason: string }[] = [];
+  for (const f of data.removedFunds) {
+    const k = kind(name(f.ticker));
+    const target = data.newLineup.find((n) => kind(name(n.ticker)) === k);
+    if (target) mappings.push({ fromTicker: f.ticker, toTicker: target.ticker, rationale: `Both ${name(f.ticker)} and ${name(target.ticker)} are index funds investing in ${k}, so risk and return should be similar.` });
+    else unmatchedFunds.push({ ticker: f.ticker, reason: `No fund in the new lineup invests in ${k}.` });
+  }
+  return {
+    ...label,
+    output: { mappings, unmatchedFunds, confidence: unmatchedFunds.length ? 'low' : 'high', reviewerNotes: 'Confirm the replacement tracks a comparable index and check its expense ratio before approving.' },
+    toolCalls: [{ tool: tools[0].name, input: { tickers }, ok: true }],
   };
 };
 

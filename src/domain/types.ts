@@ -79,6 +79,7 @@ export interface Case {
 export type ActionType =
   | 'rules.evaluate'
   | 'integration.call'
+  | 'ai.agent'
   | 'contacts.upsert'
   | 'funds.apply'
   | 'fees.apply'
@@ -147,6 +148,8 @@ export interface Task {
   draftEdited?: boolean;
   /** For email steps: whether the sent email started from the template or Claude's draft. */
   draftSource?: 'template' | 'ai';
+  /** For ai.agent steps: the agent's proposal, awaiting a person's approval. */
+  proposal?: import('../ai/agents.ts').AgentProposal;
   result?: unknown;
   createdAt: string;
   readyAt?: string;

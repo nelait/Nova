@@ -1,13 +1,14 @@
 import { createApp, type App } from '../src/app.ts';
 import type { PlanDetails } from '../src/domain/types.ts';
 import type { ModelCall } from '../src/ai/claudeAssist.ts';
+import type { AgentModel } from '../src/ai/agents.ts';
 
 export const NOW = new Date('2026-11-05T15:00:00Z');
 
-export function testApp(aiModel: ModelCall | null = null): App & { tick: (hours: number) => void } {
+export function testApp(aiModel: ModelCall | null = null, agentModel: AgentModel | null = null): App & { tick: (hours: number) => void } {
   let now = NOW.getTime();
   // Retries don't wait in tests; integrations use the built-in mock systems.
-  const app = createApp({ dbPath: ':memory:', seedUsers: true, clock: { now: () => new Date(now) }, aiModel, env: {}, sleep: async () => {} });
+  const app = createApp({ dbPath: ':memory:', seedUsers: true, clock: { now: () => new Date(now) }, aiModel, agentModel, env: {}, sleep: async () => {} });
   return Object.assign(app, { tick: (h: number) => void (now += h * 3600_000) });
 }
 

@@ -1,0 +1,61 @@
+{
+  "id": "fund-mapping",
+  "version": 1,
+  "name": "Fund mapping proposal",
+  "description": "When funds leave a plan's lineup, proposes where each removed fund's balances should move. A specialist approves or edits the proposal; rules then check it and the participant notice is built from it.",
+  "instructions": "Some funds are being removed from this retirement plan's investment lineup. Participants' balances in each removed fund must move to a fund that stays in the new lineup and has reasonably similar risk and return characteristics, so the change can qualify for ERISA 404(c)(4) fiduciary protection.\n\nFor every fund in removedFunds, propose exactly one target from newLineup, and say why in one or two sentences based on what the funds invest in (asset class, region, index or strategy). Use the lookup_funds tool to confirm details of funds you're unsure about. If no fund in newLineup is a reasonable match for a removed fund, don't force one: list it in unmatchedFunds with the reason. Never propose a target outside newLineup. Default to the plan's QDIA only when nothing else is reasonably similar, and say so.\n\nIn reviewerNotes, point out anything the specialist should double-check.",
+  "input": {
+    "removedFunds": "=whereNotIn(plan.details.funds, 'ticker', pluck(request.funds, 'ticker'))",
+    "newLineup": "=request.funds",
+    "effectiveDate": "=request.effectiveDate"
+  },
+  "tools": [
+    {
+      "name": "lookup_funds",
+      "description": "Look up funds in the investment platform's catalog by ticker. Returns each fund's name, share class, whether it is known, and whether it is available to plans.",
+      "system": "fund-catalog",
+      "operation": "lookupFunds",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "tickers": { "type": "array", "items": { "type": "string" }, "description": "Fund tickers, e.g. [\"FXAIX\"]" } },
+        "required": ["tickers"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "output": {
+    "type": "object",
+    "properties": {
+      "mappings": {
+        "type": "array",
+        "description": "One entry per removed fund that has a reasonable target",
+        "items": {
+          "type": "object",
+          "properties": {
+            "fromTicker": { "type": "string" },
+            "toTicker": { "type": "string" },
+            "rationale": { "type": "string" }
+          },
+          "required": ["fromTicker", "toTicker", "rationale"],
+          "additionalProperties": false
+        }
+      },
+      "unmatchedFunds": {
+        "type": "array",
+        "description": "Removed funds with no reasonable target in the new lineup",
+        "items": {
+          "type": "object",
+          "properties": { "ticker": { "type": "string" }, "reason": { "type": "string" } },
+          "required": ["ticker", "reason"],
+          "additionalProperties": false
+        }
+      },
+      "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+      "reviewerNotes": { "type": "string" }
+    },
+    "required": ["mappings", "unmatchedFunds", "confidence", "reviewerNotes"],
+    "additionalProperties": false
+  },
+  "effort": "medium",
+  "maxToolCalls": 4
+}

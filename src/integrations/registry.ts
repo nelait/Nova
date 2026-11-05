@@ -27,6 +27,8 @@ export interface OperationDef {
   body?: unknown;
   /** Safe to retry: GETs always are; writes only when the system de-duplicates (idempotency key). */
   idempotent?: boolean;
+  /** Has no side effects even though it may use POST (e.g. a lookup). Only read-only operations can be AI agent tools. */
+  readOnly?: boolean;
   /** Map the response: one expression, or an object of field -> expression. Can read response, status, input. */
   response?: string | Record<string, string>;
 }

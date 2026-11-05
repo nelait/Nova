@@ -14,6 +14,7 @@ import { CaseService } from './cases/caseService.ts';
 import { GuidanceService } from './guidance/guidedActions.ts';
 import { computeInsights } from './learning/insights.ts';
 import { AiAssistService, claudeModelCall, type AiAssist, type ModelCall } from './ai/claudeAssist.ts';
+import { AgentRunner, claudeAgentModel, type AgentModel } from './ai/agents.ts';
 
 export interface AppOptions {
   dbPath?: string; // ':memory:' for tests
@@ -25,6 +26,8 @@ export interface AppOptions {
    * in the environment, otherwise disabled. Pass `null` to force-disable.
    */
   aiModel?: ModelCall | null;
+  /** Model for AI agent steps. Default: Claude when credentials are set, otherwise disabled. `null` disables. */
+  agentModel?: AgentModel | null;
   /** Environment for integration URLs and secrets (default: process.env). */
   env?: Record<string, string | undefined>;
   /** HTTP transport for real (non-mock) integrations (default: fetch). */
@@ -66,7 +69,9 @@ export function createApp(opts: AppOptions = {}) {
   integrations.registerMock('fund-catalog', fundCatalogHandler);
 
   const email = new OutboxEmailGateway(outbox);
-  const executor = new ActionExecutor(kb, integrations, email);
+  const agentModel = opts.agentModel === undefined ? (hasAnthropicCredentials() ? claudeAgentModel() : undefined) : (opts.agentModel ?? undefined);
+  const agents = new AgentRunner(kb.agents, integrations, agentModel);
+  const executor = new ActionExecutor(kb, integrations, email, agents);
   const users = new UserDirectory(usersRepo);
   const cases = new CaseService(repos, kb, executor, integrations, users, clock);
   const guidance = new GuidanceService(kb, executor);
@@ -84,6 +89,7 @@ export function createApp(opts: AppOptions = {}) {
     kb,
     trac,
     integrations,
+    agents,
     email,
     users,
     cases,

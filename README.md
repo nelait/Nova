@@ -24,6 +24,11 @@ authentication, retries and operations in `config/integrations/`. Process steps
 call them with `integration.call`. Built-in mocks are used until you set the
 real URLs. See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
+AI agents are process steps too (`ai.agent`): configured in `config/agents/`, they
+see only the case data they're given, can only use read-only lookups, and return a
+schema-checked proposal that a person approves or edits before anything uses it.
+See [docs/AGENTS.md](docs/AGENTS.md).
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 ## Screenshots
@@ -36,6 +41,7 @@ From `npm run demo` (fictional sponsors; the Claude panels show labeled sample r
 | ![Validation exception](docs/screenshots/03-validation-exception.png) **Exception:** bad EIN and two QDIAs routed to a person to fix, retry or override | ![Termination fees](docs/screenshots/04-termination-fees.png) **Termination:** fee calculation for review, with a blackout-notice timing risk |
 | ![Case detail](docs/screenshots/05-case-detail.png) **Cases:** step status, assignees and the audit trail | ![Insights](docs/screenshots/10-insights.png) **Insights:** step metrics and suggested process changes |
 | ![Integrations](docs/screenshots/14-integrations.png) **Integrations:** configured systems, auth and secret status, operations, connection test, call log | ![Integration then rules](docs/screenshots/16-case-integration-then-rules.png) **Integration → rules:** the fund catalog lookup succeeds; the availability rules stop a closed fund |
+| ![AI agent proposal](docs/screenshots/17-agent-proposal.png) **AI agent step:** the fund-mapping agent's proposal, the lookup it made, and approve/edit controls | ![Agent then rules then email](docs/screenshots/18-case-agent-rules-email.png) **Agent → person → rules → email:** the approved mapping is checked, then used in the participant notice |
 | ![Rules screen](docs/screenshots/12-rules-screen.png) **Rules:** a rule set's decision table, formulas and checks; tests run; evaluated against a live case | ![Step skipped by a rule](docs/screenshots/13-case-step-skipped-by-rule.png) **Conditional step:** enrollment meetings skipped because the rules classified the plan as small |
 
 More: [paper intake](docs/screenshots/06-new-request-paper.png), [team & skills](docs/screenshots/07-team-skills.png), [recordkeeper](docs/screenshots/08-recordkeeper.png), [outbox](docs/screenshots/09-outbox.png), [phone](docs/screenshots/11-mobile-task.png).
@@ -100,6 +106,7 @@ config/
   clients/     per-client overrides (disable/add steps, change modes, swap templates and rule sets)
   rules/       versioned business rule sets with embedded test cases
   integrations/ external systems: URL, auth, retry policy, operations
+  agents/      AI agents: instructions, input mapping, read-only tools, output schema
   users.json   seed users and skills
 src/
   intake/      channel normalization + validation rule sets
@@ -111,7 +118,7 @@ src/
   actions/     action executor (prepare / execute)
   integrations/ TRAC adapter (mock), email gateway
   learning/    insights & improvement suggestions
-  ai/          Claude assistance (prompt, structured output, caching, guardrails)
+  ai/          Claude assistance and AI agent steps (tool runner, schemas, proposals)
   rules/       rule engine: expression language, rule sets, tests
   integrations/ integration registry and HTTP client; mock TRAC and fund catalog
   api/         HTTP API
@@ -132,6 +139,8 @@ test/          end-to-end tests
 | POST | `/api/rules/:id/test`, `/api/rules/:id/evaluate` | run a rule set's tests; evaluate against `{caseId}` or `{context}` |
 | GET | `/api/integrations`, `/api/integrations/calls` | configured systems; call log |
 | POST | `/api/integrations/:id/test` | run a system's health check |
+| GET | `/api/agents` | configured AI agents |
+| POST | `/api/tasks/:id/agent/run` | ask the agent for a new proposal |
 | GET | `/api/ai/status` | whether Claude is enabled |
 | GET / POST | `/api/tasks/:id/ai-assist` | stored result / ask Claude (`{refresh?}`) |
 | POST | `/api/tasks/:id/reassign` | `{toUserId?}` |

@@ -7,7 +7,8 @@ The investment lineup of the {{plan.details.sponsorName}} plan will change effec
 New lineup:
 {{request.lineupText}}
 
-Balances in removed funds will be mapped as described in the participant notice.
+Balances in removed funds will move as follows:
+  - {{steps.check-fund-mapping.outputs.mappingText}}
 
 Kind regards,
 Plan Services Team

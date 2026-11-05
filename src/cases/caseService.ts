@@ -27,10 +27,14 @@ export interface CompleteInput {
 }
 
 /**
- * Rule and integration results are large (outputs, trace, response data); the
- * audit log keeps a summary. The task keeps the full result.
+ * Rule, integration and agent results are large (outputs, trace, response data);
+ * the audit log keeps a summary. The task keeps the full result.
  */
 function auditSummary(result: unknown): unknown {
+  if (result && typeof result === 'object' && 'agent' in result && 'proposedOutput' in result) {
+    const r = result as unknown as { agent: string; version: number; edited: boolean; source: string; servedBy: string | null };
+    return { agent: `${r.agent}@v${r.version}`, source: r.source, edited: r.edited, servedBy: r.servedBy };
+  }
   if (result && typeof result === 'object' && 'callId' in result && 'system' in result) {
     const r = result as { system: string; operation: string; status: number; attempts: number; callId: string };
     return { call: `${r.system}.${r.operation}`, status: r.status, attempts: r.attempts, callId: r.callId };
@@ -239,6 +243,11 @@ export class CaseService {
         await this.runAuto(t);
         progressed = true;
       }
+
+      // AI agent steps: produce a proposal as soon as the step is ready, so the reviewer starts from it.
+      for (const t of this.tasksFor(caseId).filter((t) => t.status === 'READY' && t.action.type === 'ai.agent' && !t.proposal && !t.exception)) {
+        await this.runAgent(t);
+      }
       if (!progressed) break;
     }
     this.routeUnassigned(); // global: finished work may have freed capacity for other cases
@@ -255,6 +264,31 @@ export class CaseService {
       // Automation failed: hand the step to a person instead of stalling the case.
       this.save(task, { exception: `${(e as Error).message}${issues.length ? `: ${issues.join('; ')}` : ''}` }, 'system', 'auto-failed', { issues });
     }
+  }
+
+  private async runAgent(task: Task, actor = 'system'): Promise<Task> {
+    try {
+      const proposal = await this.exec.runAgent(this.contextFor(task, actor));
+      return this.save(task, { proposal, exception: undefined }, `agent:${proposal.agent}`, 'agent-proposed', {
+        servedBy: proposal.servedBy,
+        toolCalls: proposal.toolCalls.map((c) => `${c.tool}${c.ok ? '' : ' (failed)'}`),
+        usage: proposal.usage,
+        schemaIssues: proposal.schemaIssues,
+      });
+    } catch (e) {
+      return this.save(task, { proposal: undefined, exception: `AI agent could not produce a proposal: ${(e as Error).message}` }, actor, 'agent-failed');
+    }
+  }
+
+  /** Ask the agent for a new proposal (e.g. after it failed, or the data changed). */
+  rerunAgent(taskId: string, userId: string): Promise<Task> {
+    const t0 = this.r.tasks.require(taskId);
+    return this.withLock(t0.caseId, async () => {
+      const t = this.r.tasks.require(taskId);
+      this.requireOwner(t, userId);
+      if (t.action.type !== 'ai.agent') throw new ValidationError('This step does not run an AI agent');
+      return this.runAgent({ ...t, proposal: undefined }, userId);
+    });
   }
 
   private needsHuman(t: Task): boolean {
@@ -333,6 +367,9 @@ export class CaseService {
       if (!t.exception) throw new ValidationError('Override is only for steps in exception');
       if (!input.notes?.trim()) throw new ValidationError('Override requires a justification in notes');
       t = this.save(t, { status: 'DONE', completedAt: this.now(), result: { overridden: true, notes: input.notes } }, userId, 'overridden', { notes: input.notes, exception: t.exception });
+    } else if (t.action.type === 'ai.agent' && t.exception && input.edits?.output === undefined) {
+      // "Retry" on a failed agent step runs the agent again; the step stays open for review.
+      return this.runAgent({ ...t, proposal: undefined }, userId);
     } else if (t.mode === 'MANUAL' && t.action.type === 'none') {
       t = this.save(t, { status: 'DONE', completedAt: this.now(), result: { notes: input.notes ?? '' } }, userId, 'confirmed', { notes: input.notes });
     } else {
@@ -341,7 +378,9 @@ export class CaseService {
         if (outcome.plan) this.r.plans.update({ ...outcome.plan, updatedAt: this.now() });
         let draftEdited = outcome.draftEdited;
         let draftSource: Task['draftSource'];
-        if (draftEdited !== undefined) {
+        if (outcome.draftSource) {
+          draftSource = outcome.draftSource;
+        } else if (draftEdited !== undefined) {
           const ai = input.draftSource === 'ai' ? this.aiDraftFor?.(t.id) : undefined;
           draftSource = ai ? 'ai' : 'template';
           if (ai) draftEdited = (input.edits?.subject ?? '') !== ai.subject || (input.edits?.body ?? '') !== ai.body;

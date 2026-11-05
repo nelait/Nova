@@ -1,0 +1,43 @@
+{
+  "id": "fund-mapping-check",
+  "version": 1,
+  "name": "Fund mapping checks",
+  "description": "Checks the approved fund mapping (from the 'propose-fund-mapping' AI agent step) before the participant notice goes out.",
+  "outputs": [
+    { "name": "removedTickers", "label": "Funds being removed", "expr": "join(pluck(whereNotIn(plan.details.funds, 'ticker', pluck(request.funds, 'ticker')), 'ticker'))" },
+    { "name": "unmapped", "label": "Removed funds without a mapping", "expr": "join(pluck(whereNotIn(whereNotIn(plan.details.funds, 'ticker', pluck(request.funds, 'ticker')), 'ticker', pluck(steps['propose-fund-mapping'].output.mappings, 'fromTicker')), 'ticker'))" },
+    { "name": "badTargets", "label": "Mappings to funds not in the new lineup", "expr": "join(pluck(whereNotIn(steps['propose-fund-mapping'].output.mappings, 'toTicker', pluck(request.funds, 'ticker')), 'toTicker'))" },
+    { "name": "notRemoved", "label": "Mappings from funds that are not being removed", "expr": "join(pluck(whereNotIn(steps['propose-fund-mapping'].output.mappings, 'fromTicker', pluck(whereNotIn(plan.details.funds, 'ticker', pluck(request.funds, 'ticker')), 'ticker')), 'fromTicker'))" },
+    {
+      "name": "mappingText",
+      "label": "Mapping for the participant notice",
+      "expr": "len(steps['propose-fund-mapping'].output.mappings) > 0 ? joinPairs(steps['propose-fund-mapping'].output.mappings, 'fromTicker', 'toTicker', ' -> ', '\\n  - ') : 'No funds are being removed.'"
+    }
+  ],
+  "rules": [
+    { "id": "all-mapped", "assert": "outputs.unmapped == ''", "message": "No mapping for removed fund(s): {{outputs.unmapped}}", "reference": "ERISA 404(c)(4)" },
+    { "id": "targets-in-lineup", "assert": "outputs.badTargets == ''", "message": "Mapping targets not in the new lineup: {{outputs.badTargets}}" },
+    { "id": "sources-removed", "assert": "outputs.notRemoved == ''", "message": "Mapping given for fund(s) that are not being removed: {{outputs.notRemoved}}" },
+    { "id": "one-target-each", "assert": "!hasDuplicates(pluck(steps['propose-fund-mapping'].output.mappings, 'fromTicker'))", "message": "A removed fund is mapped more than once" }
+  ],
+  "tests": [
+    {
+      "name": "complete mapping passes",
+      "context": {
+        "plan": { "details": { "funds": [{ "ticker": "A" }, { "ticker": "B" }, { "ticker": "Q" }] } },
+        "request": { "funds": [{ "ticker": "A" }, { "ticker": "C" }, { "ticker": "Q" }] },
+        "steps": { "propose-fund-mapping": { "output": { "mappings": [{ "fromTicker": "B", "toTicker": "C" }] } } }
+      },
+      "expect": { "passed": true, "failing": [], "outputs": { "removedTickers": "B", "mappingText": "B -> C" } }
+    },
+    {
+      "name": "missing, wrong and stray mappings fail",
+      "context": {
+        "plan": { "details": { "funds": [{ "ticker": "A" }, { "ticker": "B" }, { "ticker": "D" }] } },
+        "request": { "funds": [{ "ticker": "A" }, { "ticker": "C" }] },
+        "steps": { "propose-fund-mapping": { "output": { "mappings": [{ "fromTicker": "B", "toTicker": "Z" }, { "fromTicker": "A", "toTicker": "C" }] } } }
+      },
+      "expect": { "passed": false, "failing": ["all-mapped", "targets-in-lineup", "sources-removed"], "outputs": { "unmapped": "D", "badTargets": "Z", "notRemoved": "A" } }
+    }
+  ]
+}

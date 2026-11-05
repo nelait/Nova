@@ -76,6 +76,7 @@ export class GuidanceService {
 }
 
 function allowed(task: Task): GuidedAction['allowedActions'] {
+  if (task.exception && task.action.type === 'ai.agent') return ['retry', 'approve', 'override', 'reassign'];
   if (task.exception) return ['retry', 'override', 'reassign'];
   if (task.mode === 'MANUAL' && task.action.type === 'none') return ['confirm', 'reassign'];
   return ['approve', 'reassign'];

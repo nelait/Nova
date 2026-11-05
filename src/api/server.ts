@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { AiError } from '../ai/claudeAssist.ts';
 import { FUNCTIONS, RuleError } from '../rules/expression.ts';
 import { IntegrationError } from '../integrations/client.ts';
+import { AgentError } from '../ai/agents.ts';
 
 type Handler = (ctx: { app: App; params: Record<string, string>; body: any; query: URLSearchParams; actor: string }) => unknown;
 
@@ -96,6 +97,14 @@ route('POST', '/api/rules/:id/evaluate', ({ app, params, body }) => {
 route('GET', '/api/ai/status', ({ app }) => ({ enabled: app.ai.enabled, model: app.ai.model }));
 route('GET', '/api/tasks/:id/ai-assist', ({ app, params, actor }) => app.ai.cached(params.id, actor));
 route('POST', '/api/tasks/:id/ai-assist', ({ app, params, body, actor }) => app.ai.assist(params.id, actor, !!body.refresh));
+route('POST', '/api/tasks/:id/agent/run', ({ app, params, actor }) => app.cases.rerunAgent(params.id, actor));
+route('GET', '/api/agents', ({ app }) =>
+  app.kb.agents.list().map((a) => ({
+    ...a,
+    enabled: app.agents.enabled,
+    usedBy: app.kb.listPlaybooks().flatMap((p) => p.steps.filter((s) => s.action.type === 'ai.agent' && s.action.params?.agent === a.id).map((s) => `${p.caseType} / ${s.id}`)),
+  })),
+);
 route('POST', '/api/tasks/:id/reassign', ({ app, params, body, actor }) => app.cases.reassign(params.id, actor, body.toUserId));
 
 // --- integrations & learning
@@ -176,6 +185,7 @@ export function startServer(app: App, port: number, publicDir: string) {
       }
       if (e instanceof AiError) return send(res, 503, { error: e.message });
       if (e instanceof IntegrationError) return send(res, 502, { error: e.message });
+      if (e instanceof AgentError) return send(res, 503, { error: e.message });
       if (e instanceof Anthropic.RateLimitError) return send(res, 429, { error: 'Claude is rate limited; try again shortly' });
       if (e instanceof Anthropic.AuthenticationError) return send(res, 503, { error: 'Claude rejected the API credentials' });
       if (e instanceof Anthropic.APIConnectionError) return send(res, 503, { error: 'Could not reach Claude' });

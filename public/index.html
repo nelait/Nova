@@ -91,12 +91,28 @@ async function api(path, opts = {}) {
 function toast(msg, bad) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; t.style.background = bad ? 'var(--bad)' : ''; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), bad ? 7000 : 3000); }
 async function guarded(fn) { try { await fn(); } catch (e) { toast(e.message, true); } }
 
-const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', rules: 'Rules', integrations: 'Integrations', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
+const TABS = { inbox: 'My work', intake: 'New request', cases: 'Cases', team: 'Team & skills', rules: 'Rules', integrations: 'Integrations', agents: 'Agents', trac: 'Recordkeeper', outbox: 'Outbox', insights: 'Insights' };
 function renderTabs() { $('#tabs').innerHTML = Object.entries(TABS).map(([k, v]) => `<button data-tab="${k}" class="${state.tab === k ? 'active' : ''}">${v}</button>`).join(''); }
 $('#tabs').onclick = (e) => { const k = e.target.dataset.tab; if (k) { state.tab = k; renderTabs(); render(); } };
 $('#userSel').onchange = (e) => { state.user = e.target.value; state.selTask = null; try { localStorage.setItem('planops.user', state.user); } catch {} render(); };
 
 const money = (n) => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Render an agent's JSON output: lists of objects as tables, text as paragraphs. */
+function renderAgentOutput(out, schema) {
+  const label = (k) => k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+  return Object.entries(out || {}).map(([k, v]) => {
+    const desc = schema?.properties?.[k]?.description;
+    let body;
+    if (Array.isArray(v) && v.length && typeof v[0] === 'object') {
+      const cols = Object.keys(v[0]);
+      body = `<div class="scroll"><table class="small"><tr>${cols.map((c) => `<th>${esc(label(c))}</th>`).join('')}</tr>${v.map((row) => `<tr>${cols.map((c) => `<td>${esc(row[c])}</td>`).join('')}</tr>`).join('')}</table></div>`;
+    } else if (Array.isArray(v)) body = v.length ? `<ul class="small">${v.map((x) => `<li>${esc(typeof x === 'object' ? JSON.stringify(x) : x)}</li>`).join('')}</ul>` : '<div class="small muted">None</div>';
+    else if (schema?.properties?.[k]?.enum) body = `<span class="chip">${esc(v)}</span>`;
+    else body = `<div>${esc(typeof v === 'object' ? JSON.stringify(v) : v) || '<span class="muted">—</span>'}</div>`;
+    return `<div style="margin-bottom:8px"><div class="small"><b>${esc(label(k))}</b>${desc ? ` <span class="muted">${esc(desc)}</span>` : ''}</div>${body}</div>`;
+  }).join('');
+}
+
 function fmtValue(v, format) {
   if (v === null || v === undefined) return '—';
   if (format === 'usd') return money(v);
@@ -142,6 +158,17 @@ async function renderTaskDetail(el, taskId) {
       <label>Body</label><textarea id="body" rows="14">${esc(p.body)}</textarea>`;
   } else if (p?.kind === 'system-update') {
     work = `<h3>Will ${esc(p.operation)} on ${esc(p.target)}</h3><pre>${esc(JSON.stringify(p.payload, null, 2))}</pre>`;
+  } else if (p?.kind === 'agent') {
+    const pr = p.proposal;
+    work = `<h3>AI agent: ${esc(p.name)} <span class="muted">(${esc(p.agent)} v${p.version})</span></h3>
+      ${pr ? `<div class="small muted">Proposed by ${esc(pr.servedBy)} · ${fmtDate(pr.createdAt)}${pr.toolCalls.length ? ' · looked up: ' + pr.toolCalls.map((c) => `<span class="chip ${c.ok ? 'DONE' : 'exception'}">${esc(c.tool)}${c.ok ? '' : ' failed'}</span>`).join('') : ''}</div>
+        ${pr.schemaIssues.length ? `<div class="alert bad">Proposal doesn't match the expected format: ${pr.schemaIssues.map(esc).join('; ')}</div>` : ''}
+        <div class="ai" style="margin-top:8px">${renderAgentOutput(pr.output, p.outputSchema)}</div>
+        <p class="small muted">This is a proposal. Nothing happens until you approve it; later steps use only the approved result.</p>`
+      : '<p class="small">No proposal yet. Run the agent again, or enter the result yourself below.</p>'}
+      <details ${pr ? '' : 'open'}><summary class="small"><b>${pr ? 'Edit the result before approving' : 'Enter the result'}</b> (JSON)</summary>
+        <textarea id="agentOut" rows="14">${esc(JSON.stringify(p.editable, null, 2))}</textarea></details>
+      <div class="actions" style="margin-top:6px"><button class="btn secondary" id="agentRerun">Run agent again</button></div>`;
   } else if (p?.kind === 'integration') {
     work = `<h3>External call</h3><p><b>${esc(p.systemName)}</b> → <code>${esc(p.operation)}</code> <span class="chip">${esc(p.method)}</span><span class="chip ${p.writes ? 'MANUAL' : 'AUTO'}">${p.writes ? 'changes data' : 'reads data'}</span></p>
       ${p.description ? `<p class="small muted">${esc(p.description)}</p>` : ''}<div class="small"><b>Input</b></div><pre>${esc(JSON.stringify(p.input, null, 2))}</pre>
@@ -159,14 +186,14 @@ async function renderTaskDetail(el, taskId) {
     ${g.checklist.length ? `<h3>Checklist</h3><ul class="check">${g.checklist.map((c, i) => `<li><label style="display:inline;font-weight:400"><input type="checkbox" style="width:auto" data-ck="${i}"> ${esc(c)}</label></li>`).join('')}</ul>` : ''}
     ${work}${g.prepareError ? `<div class="alert bad">${esc(g.prepareError)}</div>` : ''}
     <label>Notes</label><input id="notes" placeholder="What you checked / why" />
-    <div class="actions">
+    <div class="actions" id="taskActions">
       ${g.allowedActions.includes('approve') ? '<button class="btn" data-act="approve">Approve &amp; execute</button>' : ''}
       ${g.allowedActions.includes('confirm') ? '<button class="btn" data-act="confirm">Confirm done</button>' : ''}
       ${g.allowedActions.includes('retry') ? '<button class="btn" data-act="retry">Retry</button>' : ''}
       ${g.allowedActions.includes('override') ? '<button class="btn danger" data-act="override">Override (with justification)</button>' : ''}
       <button class="btn secondary" data-act="reassign">Reassign</button>
     </div>`;
-  el.querySelector('.actions').onclick = (e) => guarded(async () => {
+  el.querySelector('#taskActions').onclick = (e) => guarded(async () => {
     const act = e.target.dataset.act; if (!act) return;
     const notes = $('#notes').value;
     if (act === 'reassign') { const t = await api(`/tasks/${taskId}/reassign`, { method: 'POST', body: {} }); toast(t.assigneeId ? `Reassigned to ${t.assigneeId}` : 'Returned to queue'); state.selTask = null; return render(); }
@@ -174,9 +201,16 @@ async function renderTaskDetail(el, taskId) {
     if ((act === 'confirm' || act === 'approve') && boxes.some((b) => !b.checked)) throw new Error('Complete the checklist first');
     const body = { notes, override: act === 'override' };
     if ($('#subj')) { body.edits = { subject: $('#subj').value, body: $('#body').value }; body.draftSource = el.dataset.draftSource || 'template'; }
+    if ($('#agentOut') && act === 'approve') {
+      try { body.edits = { output: JSON.parse($('#agentOut').value) }; } catch { throw new Error('The edited result is not valid JSON'); }
+    }
     await api(`/tasks/${taskId}/complete`, { method: 'POST', body });
     toast('Done'); state.selTask = null; render();
   });
+  $('#agentRerun')?.addEventListener('click', () => guarded(async () => {
+    const b = $('#agentRerun'); b.disabled = true; b.textContent = 'Agent is working…';
+    try { await api(`/tasks/${taskId}/agent/run`, { method: 'POST', body: {} }); toast('New proposal ready'); } finally { renderTaskDetail(el, taskId); }
+  }));
   if (state.ai.enabled) {
     el.dataset.draftSource = 'template';
     const template = p?.kind === 'email' ? { subject: p.subject, body: p.body } : null;
@@ -379,7 +413,24 @@ async function renderIntegrations(v) {
   })));
 }
 
-const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, rules: renderRules, integrations: renderIntegrations, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
+// ---------------------------------------------------------------- agents
+async function renderAgents(v) {
+  const agents = await api('/agents');
+  v.innerHTML = `<div class="panel"><h2>AI agents (${agents.length})</h2>
+    <p class="small muted">Defined in <code>config/agents/*.json</code>. A playbook step runs one with <code>"type": "ai.agent"</code>. The agent sees only its configured input, can call only read-only lookups, and must return the output schema. Its result is a proposal that a person approves or edits; steps that run an agent must be in REVIEW mode.</p>
+    ${agents.map((a) => `<div class="item" style="cursor:default">
+      <b>${esc(a.name)}</b> <span class="muted small">${esc(a.id)} v${a.version}</span>
+      <span class="chip ${a.enabled ? 'DONE' : 'exception'}">${a.enabled ? 'model available' : 'AI not configured: manual entry'}</span>
+      <div class="small muted">${esc(a.description || '')}</div>
+      <div class="small" style="margin-top:4px"><b>Used by:</b> ${a.usedBy.map(esc).join(', ') || '—'} · effort ${esc(a.effort || 'medium')} · up to ${a.maxToolCalls ?? 5} tool calls</div>
+      <h3>Instructions</h3><pre>${esc(a.instructions)}</pre>
+      <h3>Input (the only case data it sees)</h3><div class="scroll"><table class="small">${Object.entries(a.input).map(([k, e]) => `<tr><td><b>${esc(k)}</b></td><td><code>${esc(String(e).replace(/^=/, ''))}</code></td></tr>`).join('')}</table></div>
+      <h3>Tools (read-only)</h3>${(a.tools || []).map((t) => `<div class="small"><b>${esc(t.name)}</b> → <code>${esc(t.system)}.${esc(t.operation)}</code> <span class="muted">${esc(t.description)}</span></div>`).join('') || '<div class="small muted">None</div>'}
+      <h3>Output</h3><div class="scroll"><table class="small">${Object.entries(a.output.properties || {}).map(([k, s]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(Array.isArray(s.type) ? s.type.join(' | ') : s.type || 'enum')}${s.enum ? ': ' + s.enum.map(esc).join(', ') : ''}${s.items?.properties ? ` of {${Object.keys(s.items.properties).map(esc).join(', ')}}` : ''}</td><td class="muted">${esc(s.description || '')}</td></tr>`).join('')}</table></div>
+    </div>`).join('')}</div>`;
+}
+
+const VIEWS = { inbox: renderInbox, intake: renderIntake, cases: renderCases, team: renderTeam, rules: renderRules, integrations: renderIntegrations, agents: renderAgents, trac: renderTrac, outbox: renderOutbox, insights: renderInsights };
 async function render() { const v = $('#view'); await guarded(() => VIEWS[state.tab](v)); loadUsers().catch(() => {}); }
 
 async function loadUsers() {

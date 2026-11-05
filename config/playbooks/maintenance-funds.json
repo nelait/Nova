@@ -1,6 +1,6 @@
 {
   "id": "maintenance-funds",
-  "version": 1,
+  "version": 2,
   "caseType": "MAINTENANCE_FUNDS",
   "name": "Change fund lineup",
   "description": "Add, remove or map investment options in the plan's lineup.",
@@ -15,16 +15,26 @@
       "guidance": "The new lineup must be complete, keep exactly one QDIA, and give an effective date."
     },
     {
-      "id": "review-lineup",
-      "name": "Investment review of new lineup and fund mapping",
+      "id": "propose-fund-mapping",
+      "name": "Review AI-proposed fund mapping",
       "skill": "INVESTMENTS",
       "mode": "REVIEW",
-      "action": { "type": "none" },
+      "action": { "type": "ai.agent", "params": { "agent": "fund-mapping" } },
       "dependsOn": ["validate-request"],
       "slaHours": 48,
-      "guidance": "Review the funds being removed and where their balances map to. Mapping to funds with similar risk and return keeps the fiduciary protection of a qualified change.",
-      "checklist": ["Each removed fund maps to a fund with similar risk/return", "QDIA unchanged or replacement is QDIA-eligible"],
+      "guidance": "An AI agent has proposed where each removed fund's balances should move. Check each mapping against the funds' risk and return. Mapping to funds with similar characteristics keeps the fiduciary protection of a qualified change. Edit anything that's wrong, then approve. Only the approved mapping is used.",
+      "checklist": ["Each removed fund maps to a fund with similar risk/return", "Rationales are accurate", "QDIA unchanged or replacement is QDIA-eligible"],
       "regulatoryRef": "ERISA 404(c)(4) qualified change in investment options"
+    },
+    {
+      "id": "check-fund-mapping",
+      "name": "Check approved fund mapping",
+      "skill": "INVESTMENTS",
+      "mode": "AUTO",
+      "action": { "type": "rules.evaluate", "params": { "ruleSet": "fund-mapping-check" } },
+      "dependsOn": ["propose-fund-mapping"],
+      "slaHours": 1,
+      "guidance": "Every removed fund must be mapped exactly once, to a fund in the new lineup."
     },
     {
       "id": "participant-notice",
@@ -32,7 +42,7 @@
       "skill": "MAINTENANCE",
       "mode": "REVIEW",
       "action": { "type": "email.send", "params": { "template": "fund-change-notice", "to": ["PLAN_ADMINISTRATOR"] } },
-      "dependsOn": ["review-lineup"],
+      "dependsOn": ["check-fund-mapping"],
       "slaHours": 24,
       "guidance": "Participants must be notified 30 to 60 days before a qualified change in investment options. Check that the effective date leaves at least 30 days.",
       "regulatoryRef": "ERISA 404(c)(4)(C) – 30 to 60 days advance notice"

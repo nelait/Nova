@@ -283,6 +283,20 @@ export const FUNCTIONS: Record<string, Fn> = {
   any: { arity: [3, 3], doc: 'True when any item has field equal to value', impl: (l, f, v) => list(l, 'any').some((x) => field(x, f) === v) },
   find: { arity: [3, 3], doc: 'First item whose field equals value, or null', impl: (l, f, v) => list(l, 'find').find((x) => field(x, f) === v) ?? null },
   where: { arity: [3, 3], doc: 'Items whose field equals a value', impl: (l, f, v) => list(l, 'where').filter((x) => field(x, f) === v) },
+  whereNotIn: {
+    arity: [3, 3],
+    doc: 'Items whose field is not in a list of values, e.g. funds being removed',
+    impl: (l, f, vals) => {
+      const set = new Set(list(vals, 'whereNotIn'));
+      return list(l, 'whereNotIn').filter((x) => !set.has(field(x, f)));
+    },
+  },
+  joinPairs: {
+    arity: [3, 5],
+    doc: "Text from two fields of each item, e.g. joinPairs(mappings, 'fromTicker', 'toTicker', ' -> ', '; ')",
+    impl: (l, a, b, sep = ' -> ', lineSep = '\n') =>
+      list(l, 'joinPairs').map((x) => `${String(field(x, a) ?? '')}${String(sep)}${String(field(x, b) ?? '')}`).join(String(lineSep)),
+  },
   join: { arity: [1, 2], doc: 'Join a list into text, e.g. join(list, ", ")', impl: (l, sep = ', ') => list(l, 'join').map((x) => String(x ?? '')).join(String(sep)) },
   pluck: { arity: [2, 2], doc: 'List of one field from each item', impl: (l, f) => list(l, 'pluck').map((x) => field(x, f)) },
   hasDuplicates: { arity: [1, 1], doc: 'True when a list has repeated values', impl: (l) => new Set(list(l, 'hasDuplicates')).size !== list(l, 'hasDuplicates').length },

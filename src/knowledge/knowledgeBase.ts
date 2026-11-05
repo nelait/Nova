@@ -5,6 +5,7 @@ import { ValidationError } from '../store/db.ts';
 import { RuleRegistry, STEP_CONDITION_ROOTS } from '../rules/ruleEngine.ts';
 import { compile } from '../rules/expression.ts';
 import { IntegrationRegistry, compileBody } from '../integrations/registry.ts';
+import { AgentRegistry } from '../ai/agents.ts';
 
 export interface EmailTemplate {
   name: string;
@@ -25,13 +26,15 @@ export class KnowledgeBase {
   private clients = new Map<string, ClientConfig>();
   readonly rules: RuleRegistry;
   readonly integrations: IntegrationRegistry;
+  readonly agents: AgentRegistry;
 
   constructor(configDir: string, env: Record<string, string | undefined> = process.env) {
     this.rules = new RuleRegistry(join(configDir, 'rules'));
     this.integrations = new IntegrationRegistry(join(configDir, 'integrations'), env);
+    this.agents = new AgentRegistry(join(configDir, 'agents'), this.integrations);
     for (const f of readdirSync(join(configDir, 'playbooks')).filter((f) => f.endsWith('.json'))) {
       const pb = JSON.parse(readFileSync(join(configDir, 'playbooks', f), 'utf8')) as Playbook;
-      validatePlaybook(pb, this.rules, this.integrations);
+      validatePlaybook(pb, this.rules, this.integrations, this.agents);
       this.playbooks.set(pb.caseType, pb);
     }
     for (const f of readdirSync(join(configDir, 'templates')).filter((f) => f.endsWith('.txt'))) {
@@ -90,7 +93,7 @@ export class KnowledgeBase {
       }));
     steps = steps.concat(ov.addSteps ?? []);
     const pb: Playbook = { ...base, id: `${base.id}+${clientId}`, steps };
-    validatePlaybook(pb, this.rules, this.integrations);
+    validatePlaybook(pb, this.rules, this.integrations, this.agents);
     return pb;
   }
 
@@ -106,7 +109,7 @@ export class KnowledgeBase {
  * Steps must have unique ids, known dependencies and no cycles. Rule steps must
  * name a known rule set, and step conditions must compile.
  */
-export function validatePlaybook(pb: Playbook, rules?: RuleRegistry, integrations?: IntegrationRegistry): void {
+export function validatePlaybook(pb: Playbook, rules?: RuleRegistry, integrations?: IntegrationRegistry, agents?: AgentRegistry): void {
   const ids = new Set<string>();
   for (const s of pb.steps) {
     if (ids.has(s.id)) throw new ValidationError(`Playbook ${pb.id}: duplicate step ${s.id}`);
@@ -126,6 +129,12 @@ export function validatePlaybook(pb: Playbook, rules?: RuleRegistry, integration
     if (s.action.type === 'rules.evaluate') {
       const id = String(s.action.params?.ruleSet ?? '');
       if (rules && !rules.has(id)) throw new ValidationError(`Playbook ${pb.id}: step ${s.id} uses unknown rule set "${id}"`);
+    }
+    if (s.action.type === 'ai.agent') {
+      const id = String(s.action.params?.agent ?? '');
+      if (agents && !agents.has(id)) throw new ValidationError(`Playbook ${pb.id}: step ${s.id} uses unknown agent "${id}"`);
+      // AI output is always a proposal that a person approves.
+      if (s.mode !== 'REVIEW') throw new ValidationError(`Playbook ${pb.id}: step ${s.id} runs an AI agent, so its mode must be REVIEW`);
     }
     if (s.action.type === 'integration.call') {
       const sys = String(s.action.params?.system ?? '');
